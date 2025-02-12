@@ -77,7 +77,7 @@ export default function LabsPage() {
       setLoading(true)
       setError(null)
 
-      const response = await fetch("https://data-lab-git-master-krishna-gohils-projects-ed07ca7d.vercel.app/aips/labs", {
+      const response = await fetch("https://data-lab-weld.vercel.app/aips/labs", {
         method: "GET",
         headers: {
           "Content-Type": "application/json",

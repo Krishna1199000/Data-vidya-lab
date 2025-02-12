@@ -131,7 +131,7 @@ export default function LabPage({ params }: { params: Promise<{ id: string }> })
   const fetchLab = async () => {
     console.log("Fetching lab data...")
     try {
-      const response = await fetch(`https://data-lab-git-master-krishna-gohils-projects-ed07ca7d.vercel.app/aips/labs/${resolvedParams.id}`, {
+      const response = await fetch(`https://data-lab-weld.vercel.app/aips/labs/${resolvedParams.id}`, {
         method: "GET",
         headers: {
           "Content-Type": "application/json",
