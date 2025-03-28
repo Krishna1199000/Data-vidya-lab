@@ -19,6 +19,7 @@ model User {
   labs          Lab[]
   accounts      Account[]
   sessions      Session[]
+  labSessions   LabSession[]
   createdAt     DateTime        @default(now())
   updatedAt     DateTime        @updatedAt
 }
@@ -46,7 +47,7 @@ model Lab {
   title         String
   difficulty    Difficulty @default(BEGINNER)
   duration      Int
-  description   String    @db.Text
+  description   String 
   objectives    String[]
   audience      String    @db.Text
   prerequisites String    @db.Text
@@ -57,6 +58,7 @@ model Lab {
   published     Boolean   @default(false)
   author        User      @relation(fields: [authorId], references: [id])
   authorId      String
+  sessions      LabSession[]
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
@@ -109,4 +111,27 @@ enum Difficulty {
   BEGINNER
   INTERMEDIATE
   ADVANCED
+}
+model LabSession {
+  id            String   @id @default(uuid())
+  lab           Lab      @relation(fields: [labId], references: [id])
+  labId         String
+  user          User     @relation(fields: [userId], references: [id])
+  userId        String
+  awsAccountId  String
+  password      String
+  status        LabSessionStatus @default(ACTIVE)
+  startedAt     DateTime @default(now())
+  endedAt       DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([labId])
+  @@index([userId])
+  @@index([status])
+}
+
+enum LabSessionStatus {
+  ACTIVE
+  ENDED
 }
