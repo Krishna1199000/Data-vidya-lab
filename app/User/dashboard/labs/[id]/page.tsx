@@ -24,7 +24,7 @@ import { Badge } from "@/components/ui/badge"
 import { useSession } from "next-auth/react"
 import Link from "next/link"
 import Image from "next/image"
-import { LabControls } from "@/components/lab-controls";
+
 import ErrorBoundary from "@/components/ui/error-boundary"
 
 interface Profile {
@@ -93,6 +93,10 @@ export default function LabPage({ params }: { params: Promise<{ id: string }> })
   const [authorProfile, setAuthorProfile] = useState<Profile | null>(null)
   const router = useRouter()
   const { status } = useSession()
+
+  const handleStartLab = () => {
+    router.push(`/User/dashboard/labs/${resolvedParams.id}/credentials`);
+  };
 
   useEffect(() => {
     console.log("useEffect triggered with params.id:", resolvedParams.id)
@@ -227,7 +231,12 @@ export default function LabPage({ params }: { params: Promise<{ id: string }> })
               </div>
             </div>
             
-            <LabControls labId={lab.id} />
+            <Button 
+          onClick={handleStartLab}
+          className="bg-emerald-600 hover:bg-emerald-700 text-white"
+        >
+          Start Lab
+        </Button>
             
           </div>
 
