@@ -16,6 +16,9 @@ import crypto from "crypto";
 
 const prisma = new PrismaClient();
 
+// Add a simple in-memory lock to prevent concurrent requests from the same user
+const processingRequests = new Map<string, boolean>();
+
 const AWS_ACCOUNTS = [
   {
     id: "124744987862",
@@ -215,74 +218,114 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const body = await request.json();
-    const { labId } = body;
-
-    // Check if user already has an active session
-    const activeSession = await prisma.labSession.findFirst({
-      where: {
-        userId: session.user.id,
-        status: "ACTIVE"
-      }
-    });
-
-    if (activeSession) {
-      return NextResponse.json({ error: "You already have an active lab session" }, { status: 400 });
-    }
-
-    // Find an available AWS account
-    const activeSessions = await prisma.labSession.findMany({
-      where: { status: "ACTIVE" }
-    });
-
-    const usedAccountIds = activeSessions.map(session => session.awsAccountId);
-    const availableAccount = AWS_ACCOUNTS.find(account => !usedAccountIds.includes(account.id));
-
-    if (!availableAccount) {
-      return NextResponse.json({ error: "No AWS accounts available. Please try again later." }, { status: 503 });
-    }
-
-    // Get temporary credentials using AWS STS
-    const tempCredentials = await getTemporaryCredentials(availableAccount);
+    const userId = session.user.id;
     
-    // Generate sign-in URL for AWS Console
-    const consoleUrl = await generateConsoleUrl(
-      availableAccount.region,
-      tempCredentials
-    );
-
-    // Generate a random password for the lab session
-    const sessionPassword = generateSessionPassword();
+    // Check if this user already has a request in progress
+    if (processingRequests.get(userId)) {
+      return NextResponse.json({ 
+        error: "Another request is already being processed", 
+        code: "CONCURRENT_REQUEST"
+      }, { status: 429 });
+    }
     
-    // Set the temporary password for IAM user
-    await setTemporaryIamPassword(availableAccount, sessionPassword);
+    // Mark this user as having a request in progress
+    processingRequests.set(userId, true);
+    
+    try {
+      const body = await request.json();
+      const { labId } = body;
 
-    // Create lab session with minimal required fields
-    const labSession = await prisma.labSession.create({
-      data: {
-        labId,
-        userId: session.user.id,
-        awsAccountId: availableAccount.id,
-        password: sessionPassword,
-        expiresAt: tempCredentials.Expiration!,
-        status: "ACTIVE"
+      // Check if user already has an active session in the database
+      const activeSession = await prisma.labSession.findFirst({
+        where: {
+          userId: userId,
+          status: "ACTIVE"
+        }
+      });
+
+      if (activeSession) {
+        // If the user already has an active session, return it instead of creating a new one
+        const account = AWS_ACCOUNTS.find(acc => acc.id === activeSession.awsAccountId);
+        
+        if (!account) {
+          throw new Error("Associated AWS account not found");
+        }
+        
+        // Get fresh credentials using the existing session info
+        const tempCredentials = await getTemporaryCredentials(account);
+        const consoleUrl = await generateConsoleUrl(account.region, tempCredentials);
+        
+        return NextResponse.json({
+          sessionId: activeSession.id,
+          credentials: {
+            accountId: account.id,
+            username: account.username,
+            password: activeSession.password, // Use stored password
+            accessKeyId: tempCredentials.AccessKeyId,
+            secretAccessKey: tempCredentials.SecretAccessKey,
+            sessionToken: tempCredentials.SessionToken,
+            region: account.region,
+            consoleUrl
+          }
+        });
       }
-    });
 
-    return NextResponse.json({
-      sessionId: labSession.id,
-      credentials: {
-        accountId: availableAccount.id,
-        username: availableAccount.username,
-        password: sessionPassword, // Include temporary password in response
-        accessKeyId: tempCredentials.AccessKeyId,
-        secretAccessKey: tempCredentials.SecretAccessKey,
-        sessionToken: tempCredentials.SessionToken,
-        region: availableAccount.region,
-        consoleUrl
+      // Find an available AWS account
+      const activeSessions = await prisma.labSession.findMany({
+        where: { status: "ACTIVE" }
+      });
+
+      const usedAccountIds = activeSessions.map(session => session.awsAccountId);
+      const availableAccount = AWS_ACCOUNTS.find(account => !usedAccountIds.includes(account.id));
+
+      if (!availableAccount) {
+        return NextResponse.json({ error: "No AWS accounts available. Please try again later." }, { status: 503 });
       }
-    });
 
+      // Generate a random password for the lab session
+      const sessionPassword = generateSessionPassword();
+      
+      // Set the temporary password for IAM user
+      await setTemporaryIamPassword(availableAccount, sessionPassword);
+
+      // Get temporary credentials using AWS STS - CALL ONLY ONCE
+      const tempCredentials = await getTemporaryCredentials(availableAccount);
+      
+      // Generate sign-in URL for AWS Console using the same credentials
+      const consoleUrl = await generateConsoleUrl(
+        availableAccount.region,
+        tempCredentials
+      );
+
+      // Create lab session with minimal required fields
+      const labSession = await prisma.labSession.create({
+        data: {
+          labId,
+          userId: userId,
+          awsAccountId: availableAccount.id,
+          password: sessionPassword,
+          expiresAt: tempCredentials.Expiration!,
+          status: "ACTIVE"
+        }
+      });
+
+      return NextResponse.json({
+        sessionId: labSession.id,
+        credentials: {
+          accountId: availableAccount.id,
+          username: availableAccount.username,
+          password: sessionPassword,
+          accessKeyId: tempCredentials.AccessKeyId,
+          secretAccessKey: tempCredentials.SecretAccessKey,
+          sessionToken: tempCredentials.SessionToken,
+          region: availableAccount.region,
+          consoleUrl
+        }
+      });
+    } finally {
+      // Always clean up the lock when done
+      processingRequests.delete(userId);
+    }
   } catch (error: any) {
     // Safely log the error without causing another error
     console.error("Error starting lab:", error ? error.toString() : "Unknown error");

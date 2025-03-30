@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Copy, Info, ExternalLink } from "lucide-react";
+import { Copy, Info, ExternalLink, LogOut } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
 import {
   Tooltip,
@@ -12,6 +12,14 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "@/components/ui/dialog";
 
 interface Credentials {
   accountId: string;
@@ -21,6 +29,7 @@ interface Credentials {
   sessionToken: string;
   region: string;
   consoleUrl: string;
+  password?: string;
 }
 
 interface LabResponse {
@@ -34,17 +43,45 @@ export default function LabCredentials({ params }: { params: { id: string } }) {
   const [error, setError] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [password, setPassword] = useState("LabPassword123!"); // Default password
+  const [awsConsoleWindow, setAwsConsoleWindow] = useState<Window | null>(null);
+  const [showLogoutDialog, setShowLogoutDialog] = useState(false);
   const router = useRouter();
   const { toast } = useToast();
+  const startLabInProgress = useRef(false);
 
   useEffect(() => {
-    startLab();
-    // Generate a more secure password
+    if (!startLabInProgress.current) {
+      startLab();
+    }
+    
     const generatedPassword = `Lab${Math.random().toString(36).substring(2, 8)}${Math.floor(Math.random() * 100)}!`;
     setPassword(generatedPassword);
+
+    // Add event listener to detect when AWS console window is closed
+    const handleWindowMessage = (event: MessageEvent) => {
+      if (event.data === 'aws-console-closed') {
+        toast({
+          title: "AWS Console",
+          description: "AWS Console window was closed",
+        });
+      }
+    };
+    
+    window.addEventListener('message', handleWindowMessage);
+    
+    return () => {
+      window.removeEventListener('message', handleWindowMessage);
+    };
   }, []);
 
   const startLab = async () => {
+    if (startLabInProgress.current) {
+      console.log("Start lab request already in progress, skipping");
+      return;
+    }
+    
+    startLabInProgress.current = true;
+    
     try {
       setLoading(true);
       const response = await fetch("/api/labs/start", {
@@ -69,11 +106,15 @@ export default function LabCredentials({ params }: { params: { id: string } }) {
 
       setSessionId(data.sessionId);
       setCredentials(data.credentials);
+      if (data.credentials.password) {
+        setPassword(data.credentials.password);
+      }
     } catch (err) {
       console.error("Error starting lab:", err);
       setError(err instanceof Error ? err.message : "An error occurred");
     } finally {
       setLoading(false);
+      startLabInProgress.current = false;
     }
   };
 
@@ -102,12 +143,31 @@ export default function LabCredentials({ params }: { params: { id: string } }) {
         throw new Error(data.error || "Failed to end lab");
       }
 
-      toast({
-        title: "Success",
-        description: "Lab session ended successfully",
-      });
+      const data = await response.json();
+      
+      // Show the logout dialog with instructions
+      setShowLogoutDialog(true);
+      
+      // If we have a reference to the AWS console window, attempt to close it
+      if (awsConsoleWindow && !awsConsoleWindow.closed) {
+        try {
+          // Try to clear AWS console cookies
+          const logoutScript = `
+            document.querySelectorAll('a[data-testid="signout-link"]').forEach(link => {
+              link.click();
+            });
+            window.close();
+            window.opener.postMessage('aws-console-closed', '*');
+          `;
+          
+          // Attempt to execute logout script in AWS console window
+          // Note: This may fail due to cross-origin restrictions
+          awsConsoleWindow.eval(logoutScript);
+        } catch (windowErr) {
+          console.log("Could not automatically sign out of AWS console", windowErr);
+        }
+      }
 
-      router.push("/dashboard");
     } catch (err) {
       console.error("Error ending lab:", err);
       toast({
@@ -116,6 +176,14 @@ export default function LabCredentials({ params }: { params: { id: string } }) {
         variant: "destructive",
       });
     }
+  };
+
+  const completeLabEnd = () => {
+    toast({
+      title: "Success",
+      description: "Lab session ended successfully",
+    });
+    router.push(`/User/dashboard/labs/${params.id}`);
   };
 
   const copyToClipboard = (text: string, label: string) => {
@@ -128,11 +196,12 @@ export default function LabCredentials({ params }: { params: { id: string } }) {
 
   const openAWSConsole = () => {
     if (credentials?.consoleUrl) {
-      window.open(credentials.consoleUrl, "_blank");
+      // Store reference to the opened window
+      const newWindow = window.open(credentials.consoleUrl, "_blank");
+      setAwsConsoleWindow(newWindow);
     }
   };
 
-  // Copy all login information at once
   const copyAllCredentials = () => {
     if (!credentials) return;
 
@@ -292,9 +361,10 @@ Password: ${password}`;
           </div>
 
           <Button
-            className="w-full bg-red-600 hover:bg-red-700 text-white mt-4"
+            className="w-full bg-red-600 hover:bg-red-700 text-white mt-4 flex items-center justify-center gap-2"
             onClick={endLab}
           >
+            <LogOut className="h-4 w-4" />
             End Lab
           </Button>
 
@@ -306,11 +376,45 @@ Password: ${password}`;
                 <li>Do not share these credentials with anyone</li>
                 <li>Save your work before the session expires</li>
                 <li>If the console button doesn't work, use the manual login instructions above</li>
+                <li>Click "End Lab" to properly terminate your session and log out</li>
               </ul>
             </div>
           </div>
         </div>
       </Card>
+
+      {/* Logout Dialog */}
+      <Dialog open={showLogoutDialog} onOpenChange={setShowLogoutDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Sign out of AWS Console</DialogTitle>
+            <DialogDescription>
+              Your lab has been ended. Please make sure to sign out of the AWS Console.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="bg-muted p-4 rounded-lg my-4">
+            <h3 className="font-medium mb-2">To sign out from AWS Console:</h3>
+            <ol className="list-decimal pl-5 space-y-1 text-sm">
+              <li>Go to your AWS Console window</li>
+              <li>Click on your username in the top right corner</li>
+              <li>Select "Sign Out"</li>
+              <li>Close the AWS Console window</li>
+            </ol>
+            <div className="mt-3 flex items-center justify-center">
+              <LogOut className="h-6 w-6 text-red-500" />
+            </div>
+          </div>
+          <DialogFooter className="sm:justify-center">
+            <Button 
+              type="button" 
+              onClick={completeLabEnd} 
+              className="bg-blue-600 hover:bg-blue-700 text-white"
+            >
+              I have signed out
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
