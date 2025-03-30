@@ -23,15 +23,25 @@ interface Credentials {
   consoleUrl: string;
 }
 
+interface LabResponse {
+  sessionId: string;
+  credentials: Credentials;
+}
+
 export default function LabCredentials({ params }: { params: { id: string } }) {
   const [credentials, setCredentials] = useState<Credentials | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [password, setPassword] = useState("LabPassword123!"); // Default password
   const router = useRouter();
   const { toast } = useToast();
 
   useEffect(() => {
     startLab();
+    // Generate a more secure password
+    const generatedPassword = `Lab${Math.random().toString(36).substring(2, 8)}${Math.floor(Math.random() * 100)}!`;
+    setPassword(generatedPassword);
   }, []);
 
   const startLab = async () => {
@@ -50,9 +60,14 @@ export default function LabCredentials({ params }: { params: { id: string } }) {
         throw new Error(data.error || `Failed to start lab: ${response.status}`);
       }
 
-      const data = await response.json();
+      const data: LabResponse = await response.json();
       console.log("Lab session created successfully", data);
 
+      if (!data.sessionId) {
+        throw new Error("No session ID received from server");
+      }
+
+      setSessionId(data.sessionId);
       setCredentials(data.credentials);
     } catch (err) {
       console.error("Error starting lab:", err);
@@ -63,13 +78,23 @@ export default function LabCredentials({ params }: { params: { id: string } }) {
   };
 
   const endLab = async () => {
+    if (!sessionId) {
+      toast({
+        title: "Error",
+        description: "No active lab session found",
+        variant: "destructive",
+      });
+      return;
+    }
+
     try {
+      console.log("Ending lab session with ID:", sessionId);
       const response = await fetch("/api/labs/end", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ sessionId: params.id }),
+        body: JSON.stringify({ sessionId }),
       });
 
       if (!response.ok) {
@@ -78,11 +103,11 @@ export default function LabCredentials({ params }: { params: { id: string } }) {
       }
 
       toast({
-        title: "Lab Ended",
-        description: "The lab session has ended successfully.",
+        title: "Success",
+        description: "Lab session ended successfully",
       });
 
-      router.push("/dashboard"); // Redirect to dashboard after ending the lab
+      router.push("/dashboard");
     } catch (err) {
       console.error("Error ending lab:", err);
       toast({
@@ -92,7 +117,6 @@ export default function LabCredentials({ params }: { params: { id: string } }) {
       });
     }
   };
-
 
   const copyToClipboard = (text: string, label: string) => {
     navigator.clipboard.writeText(text);
@@ -106,6 +130,22 @@ export default function LabCredentials({ params }: { params: { id: string } }) {
     if (credentials?.consoleUrl) {
       window.open(credentials.consoleUrl, "_blank");
     }
+  };
+
+  // Copy all login information at once
+  const copyAllCredentials = () => {
+    if (!credentials) return;
+
+    const credentialText = 
+`Account ID: ${credentials.accountId}
+Username: ${credentials.username}
+Password: ${password}`;
+
+    navigator.clipboard.writeText(credentialText);
+    toast({
+      title: "Copied!",
+      description: "All login credentials copied to clipboard",
+    });
   };
 
   if (loading) {
@@ -151,6 +191,24 @@ export default function LabCredentials({ params }: { params: { id: string } }) {
             <p className="text-xs text-center mt-2 text-muted-foreground">
               Click the button above to open the AWS Management Console
             </p>
+          </div>
+
+          <div className="bg-muted p-4 rounded-lg mb-4">
+            <h3 className="font-medium mb-2">Manual Login Instructions:</h3>
+            <ol className="list-decimal pl-5 space-y-1 text-sm">
+              <li>If the AWS Console button doesn't work, go to <a href="https://signin.aws.amazon.com/console" target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">AWS Console Login</a></li>
+              <li>Select <strong>"IAM user"</strong></li>
+              <li>Enter the Account ID, Username, and Password below</li>
+              <li>Click "Sign in"</li>
+            </ol>
+            <Button 
+              variant="outline" 
+              size="sm" 
+              className="mt-3 w-full"
+              onClick={copyAllCredentials}
+            >
+              <Copy className="h-3 w-3 mr-1" /> Copy All Credentials
+            </Button>
           </div>
 
           <div className="space-y-4">
@@ -209,88 +267,36 @@ export default function LabCredentials({ params }: { params: { id: string } }) {
             <div className="flex items-center justify-between p-4 bg-muted rounded-lg">
               <div className="flex-1">
                 <div className="flex items-center gap-2">
-                  <p className="text-sm text-muted-foreground">Access Key ID</p>
+                  <p className="text-sm text-muted-foreground">Password</p>
                   <TooltipProvider>
                     <Tooltip>
                       <TooltipTrigger>
                         <Info className="h-4 w-4 text-muted-foreground" />
                       </TooltipTrigger>
                       <TooltipContent>
-                        <p>AWS Access Key for CLI or SDK access</p>
+                        <p>Password for AWS console login</p>
                       </TooltipContent>
                     </Tooltip>
                   </TooltipProvider>
                 </div>
-                <p className="font-mono mt-1">{credentials.accessKeyId}</p>
+                <p className="font-mono mt-1">{password}</p>
               </div>
               <Button
                 variant="ghost"
                 size="icon"
-                onClick={() => copyToClipboard(credentials.accessKeyId, "Access Key ID")}
+                onClick={() => copyToClipboard(password, "Password")}
               >
                 <Copy className="h-4 w-4" />
               </Button>
-            </div>
-
-            <div className="flex items-center justify-between p-4 bg-muted rounded-lg">
-              <div className="flex-1">
-                <div className="flex items-center gap-2">
-                  <p className="text-sm text-muted-foreground">Secret Access Key</p>
-                  <TooltipProvider>
-                    <Tooltip>
-                      <TooltipTrigger>
-                        <Info className="h-4 w-4 text-muted-foreground" />
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        <p>AWS Secret Access Key for CLI or SDK access</p>
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
-                </div>
-                <p className="font-mono mt-1">{credentials.secretAccessKey}</p>
-              </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => copyToClipboard(credentials.secretAccessKey, "Secret Access Key")}
-              >
-                <Copy className="h-4 w-4" />
-              </Button>
-            </div>
-
-            <div className="flex items-center justify-between p-4 bg-muted rounded-lg">
-              <div className="flex-1">
-                <div className="flex items-center gap-2">
-                  <p className="text-sm text-muted-foreground">Region</p>
-                  <TooltipProvider>
-                    <Tooltip>
-                      <TooltipTrigger>
-                        <Info className="h-4 w-4 text-muted-foreground" />
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        <p>AWS region for your resources</p>
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
-                </div>
-                <p className="font-mono mt-1">{credentials.region}</p>
-              </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => copyToClipboard(credentials.region, "Region")}
-              >
-                <Copy className="h-4 w-4" />
-              </Button>
-              <Button
-                className="w-full bg-red-600 hover:bg-red-700 text-white mt-4"
-                onClick={endLab}
-              >
-                End Lab
-              </Button>
-
             </div>
           </div>
+
+          <Button
+            className="w-full bg-red-600 hover:bg-red-700 text-white mt-4"
+            onClick={endLab}
+          >
+            End Lab
+          </Button>
 
           <div className="pt-6">
             <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-900/30 rounded-lg p-4">
@@ -299,7 +305,7 @@ export default function LabCredentials({ params }: { params: { id: string } }) {
                 <li>These credentials will expire after 1 hour</li>
                 <li>Do not share these credentials with anyone</li>
                 <li>Save your work before the session expires</li>
-                <li>If the console button doesn't work, copy and paste the credentials manually</li>
+                <li>If the console button doesn't work, use the manual login instructions above</li>
               </ul>
             </div>
           </div>

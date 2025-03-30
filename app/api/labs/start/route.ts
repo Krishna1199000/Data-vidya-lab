@@ -7,6 +7,11 @@ import {
   GetFederationTokenCommand,
   Credentials as STSCredentials 
 } from "@aws-sdk/client-sts";
+import { 
+  IAMClient, 
+  UpdateLoginProfileCommand, 
+  CreateLoginProfileCommand 
+} from "@aws-sdk/client-iam";
 import crypto from "crypto";
 
 const prisma = new PrismaClient();
@@ -65,6 +70,11 @@ async function getTemporaryCredentials(account: typeof AWS_ACCOUNTS[0]): Promise
   if (!response.Credentials) {
     throw new Error("Failed to get temporary credentials");
   }
+
+  console.log("Temporary credentials obtained:", {
+    AccessKeyId: response.Credentials.AccessKeyId,
+    Expiration: response.Credentials.Expiration
+  });
 
   return response.Credentials;
 }
@@ -128,9 +138,74 @@ async function generateConsoleUrl(
   }
 }
 
-// Generate a random password for lab session
+// Generate a random password for lab session that meets AWS IAM requirements
 function generateSessionPassword(): string {
-  return crypto.randomBytes(12).toString('hex');
+  // Create a password that meets AWS IAM requirements
+  const upper = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  const lower = 'abcdefghijklmnopqrstuvwxyz';
+  const numbers = '0123456789';
+  const special = '!@#$%^&*()_+-=[]{}|;:,.<>?';
+  
+  let password = '';
+  // Ensure at least one of each type
+  password += upper.charAt(Math.floor(Math.random() * upper.length));
+  password += lower.charAt(Math.floor(Math.random() * lower.length));
+  password += numbers.charAt(Math.floor(Math.random() * numbers.length));
+  password += special.charAt(Math.floor(Math.random() * special.length));
+  
+  // Add more random characters
+  for (let i = 0; i < 8; i++) {
+    const allChars = upper + lower + numbers + special;
+    password += allChars.charAt(Math.floor(Math.random() * allChars.length));
+  }
+  
+  // Shuffle the password
+  return password.split('').sort(() => 0.5 - Math.random()).join('');
+}
+
+// Function to set temporary IAM user password
+async function setTemporaryIamPassword(account: typeof AWS_ACCOUNTS[0], password: string): Promise<boolean> {
+  const iamClient = new IAMClient({
+    region: account.region,
+    credentials: {
+      accessKeyId: account.accessKeyId,
+      secretAccessKey: account.secretAccessKey
+    }
+  });
+
+  try {
+    // Try to update existing login profile
+    const updateCommand = new UpdateLoginProfileCommand({
+      UserName: account.username,
+      Password: password,
+      PasswordResetRequired: false
+    });
+    
+    await iamClient.send(updateCommand);
+    console.log(`Successfully updated password for ${account.username}`);
+    return true;
+  } catch (error: any) {
+    if (error.name === 'NoSuchEntityException') {
+      // If user doesn't have a login profile, create one
+      try {
+        const createCommand = new CreateLoginProfileCommand({
+          UserName: account.username,
+          Password: password,
+          PasswordResetRequired: false
+        });
+        
+        await iamClient.send(createCommand);
+        console.log(`Successfully created login profile for ${account.username}`);
+        return true;
+      } catch (createError) {
+        console.error("Error creating login profile:", createError);
+        throw createError;
+      }
+    } else {
+      console.error("Error updating login profile:", error);
+      throw error;
+    }
+  }
 }
 
 export async function POST(request: NextRequest) {
@@ -169,11 +244,7 @@ export async function POST(request: NextRequest) {
 
     // Get temporary credentials using AWS STS
     const tempCredentials = await getTemporaryCredentials(availableAccount);
-    console.log("Temporary credentials obtained:", {
-      AccessKeyId: tempCredentials.AccessKeyId,
-      Expiration: tempCredentials.Expiration
-    });
-
+    
     // Generate sign-in URL for AWS Console
     const consoleUrl = await generateConsoleUrl(
       availableAccount.region,
@@ -182,6 +253,9 @@ export async function POST(request: NextRequest) {
 
     // Generate a random password for the lab session
     const sessionPassword = generateSessionPassword();
+    
+    // Set the temporary password for IAM user
+    await setTemporaryIamPassword(availableAccount, sessionPassword);
 
     // Create lab session with minimal required fields
     const labSession = await prisma.labSession.create({
@@ -194,23 +268,13 @@ export async function POST(request: NextRequest) {
         status: "ACTIVE"
       }
     });
-    
-    // Store AWS credentials separately - not in the database
-    // This is a temporary solution to avoid schema issues
-    const sessionWithCredentials = {
-      ...labSession,
-      aws_credentials: {
-        accessKeyId: tempCredentials.AccessKeyId,
-        secretAccessKey: tempCredentials.SecretAccessKey,
-        sessionToken: tempCredentials.SessionToken
-      }
-    };
 
     return NextResponse.json({
       sessionId: labSession.id,
       credentials: {
         accountId: availableAccount.id,
         username: availableAccount.username,
+        password: sessionPassword, // Include temporary password in response
         accessKeyId: tempCredentials.AccessKeyId,
         secretAccessKey: tempCredentials.SecretAccessKey,
         sessionToken: tempCredentials.SessionToken,
@@ -219,9 +283,12 @@ export async function POST(request: NextRequest) {
       }
     });
 
-  } catch (error) {
+  } catch (error: any) {
     // Safely log the error without causing another error
     console.error("Error starting lab:", error ? error.toString() : "Unknown error");
-    return NextResponse.json({ error: "Failed to start lab" }, { status: 500 });
+    return NextResponse.json({ 
+      error: "Failed to start lab", 
+      details: error?.message || "Unknown error" 
+    }, { status: 500 });
   }
 }
