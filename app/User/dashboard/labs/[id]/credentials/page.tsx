@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Copy, Info, ExternalLink, LogOut } from "lucide-react";
+import { Copy, Info, ExternalLink, LogOut, Database } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
 import {
   Tooltip,
@@ -20,16 +20,22 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
 
 interface Credentials {
   accountId: string;
   username: string;
+  password: string;
   accessKeyId: string;
   secretAccessKey: string;
-  sessionToken: string;
   region: string;
   consoleUrl: string;
-  password?: string;
+  s3BucketName: string;
 }
 
 interface LabResponse {
@@ -42,7 +48,6 @@ export default function LabCredentials({ params }: { params: { id: string } }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
-  const [password, setPassword] = useState("LabPassword123!"); // Default password
   const [awsConsoleWindow, setAwsConsoleWindow] = useState<Window | null>(null);
   const [showLogoutDialog, setShowLogoutDialog] = useState(false);
   const router = useRouter();
@@ -53,11 +58,7 @@ export default function LabCredentials({ params }: { params: { id: string } }) {
     if (!startLabInProgress.current) {
       startLab();
     }
-    
-    const generatedPassword = `Lab${Math.random().toString(36).substring(2, 8)}${Math.floor(Math.random() * 100)}!`;
-    setPassword(generatedPassword);
 
-    // Add event listener to detect when AWS console window is closed
     const handleWindowMessage = (event: MessageEvent) => {
       if (event.data === 'aws-console-closed') {
         toast({
@@ -84,12 +85,11 @@ export default function LabCredentials({ params }: { params: { id: string } }) {
     
     try {
       setLoading(true);
-      const response = await fetch("/api/labs/start", {
+      const response = await fetch(`/api/labs/${params.id}/start`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ labId: params.id }),
       });
 
       if (!response.ok) {
@@ -106,9 +106,6 @@ export default function LabCredentials({ params }: { params: { id: string } }) {
 
       setSessionId(data.sessionId);
       setCredentials(data.credentials);
-      if (data.credentials.password) {
-        setPassword(data.credentials.password);
-      }
     } catch (err) {
       console.error("Error starting lab:", err);
       setError(err instanceof Error ? err.message : "An error occurred");
@@ -130,7 +127,7 @@ export default function LabCredentials({ params }: { params: { id: string } }) {
 
     try {
       console.log("Ending lab session with ID:", sessionId);
-      const response = await fetch("/api/labs/end", {
+      const response = await fetch(`/api/labs/${params.id}/end`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -144,14 +141,10 @@ export default function LabCredentials({ params }: { params: { id: string } }) {
       }
 
       const data = await response.json();
-      
-      // Show the logout dialog with instructions
       setShowLogoutDialog(true);
       
-      // If we have a reference to the AWS console window, attempt to close it
       if (awsConsoleWindow && !awsConsoleWindow.closed) {
         try {
-          // Try to clear AWS console cookies
           const logoutScript = `
             document.querySelectorAll('a[data-testid="signout-link"]').forEach(link => {
               link.click();
@@ -159,9 +152,6 @@ export default function LabCredentials({ params }: { params: { id: string } }) {
             window.close();
             window.opener.postMessage('aws-console-closed', '*');
           `;
-          
-          // Attempt to execute logout script in AWS console window
-          // Note: This may fail due to cross-origin restrictions
           awsConsoleWindow.eval(logoutScript);
         } catch (windowErr) {
           console.log("Could not automatically sign out of AWS console", windowErr);
@@ -183,7 +173,7 @@ export default function LabCredentials({ params }: { params: { id: string } }) {
       title: "Success",
       description: "Lab session ended successfully",
     });
-    router.push(`/User/dashboard/labs/${params.id}`);
+    router.push(`/dashboard/labs/${params.id}`);
   };
 
   const copyToClipboard = (text: string, label: string) => {
@@ -196,7 +186,6 @@ export default function LabCredentials({ params }: { params: { id: string } }) {
 
   const openAWSConsole = () => {
     if (credentials?.consoleUrl) {
-      // Store reference to the opened window
       const newWindow = window.open(credentials.consoleUrl, "_blank");
       setAwsConsoleWindow(newWindow);
     }
@@ -206,14 +195,25 @@ export default function LabCredentials({ params }: { params: { id: string } }) {
     if (!credentials) return;
 
     const credentialText = 
-`Account ID: ${credentials.accountId}
+`AWS Account Information:
+Account ID: ${credentials.accountId}
+Region: ${credentials.region}
+
+Console Access:
 Username: ${credentials.username}
-Password: ${password}`;
+Password: ${credentials.password}
+
+Programmatic Access:
+Access Key ID: ${credentials.accessKeyId}
+Secret Access Key: ${credentials.secretAccessKey}
+
+Resources:
+S3 Bucket: ${credentials.s3BucketName}`;
 
     navigator.clipboard.writeText(credentialText);
     toast({
       title: "Copied!",
-      description: "All login credentials copied to clipboard",
+      description: "All credentials copied to clipboard",
     });
   };
 
@@ -243,142 +243,160 @@ Password: ${password}`;
 
   return (
     <div className="min-h-screen bg-background p-8">
-      <Card className="max-w-xl mx-auto p-6">
-        <div className="flex items-center gap-2 mb-6">
-          <h1 className="text-2xl font-bold">AWS Lab Credentials</h1>
-        </div>
-
-        <div className="space-y-4">
-          <div className="mb-6">
-            <Button
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white flex items-center justify-center gap-2"
-              onClick={openAWSConsole}
-            >
-              <ExternalLink className="h-4 w-4" />
-              Open AWS Console
-            </Button>
-            <p className="text-xs text-center mt-2 text-muted-foreground">
-              Click the button above to open the AWS Management Console
-            </p>
-          </div>
-
-          <div className="bg-muted p-4 rounded-lg mb-4">
-            <h3 className="font-medium mb-2">Manual Login Instructions:</h3>
-            <ol className="list-decimal pl-5 space-y-1 text-sm">
-              <li>If the AWS Console button doesn't work, go to <a href="https://signin.aws.amazon.com/console" target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">AWS Console Login</a></li>
-              <li>Select <strong>"IAM user"</strong></li>
-              <li>Enter the Account ID, Username, and Password below</li>
-              <li>Click "Sign in"</li>
-            </ol>
-            <Button 
-              variant="outline" 
-              size="sm" 
-              className="mt-3 w-full"
-              onClick={copyAllCredentials}
-            >
-              <Copy className="h-3 w-3 mr-1" /> Copy All Credentials
-            </Button>
-          </div>
-
-          <div className="space-y-4">
-            <div className="flex items-center justify-between p-4 bg-muted rounded-lg">
-              <div className="flex-1">
-                <div className="flex items-center gap-2">
-                  <p className="text-sm text-muted-foreground">Account ID</p>
-                  <TooltipProvider>
-                    <Tooltip>
-                      <TooltipTrigger>
-                        <Info className="h-4 w-4 text-muted-foreground" />
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        <p>Your AWS account identifier</p>
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
-                </div>
-                <p className="font-mono mt-1">{credentials.accountId}</p>
-              </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => copyToClipboard(credentials.accountId, "Account ID")}
-              >
-                <Copy className="h-4 w-4" />
-              </Button>
-            </div>
-
-            <div className="flex items-center justify-between p-4 bg-muted rounded-lg">
-              <div className="flex-1">
-                <div className="flex items-center gap-2">
-                  <p className="text-sm text-muted-foreground">Username</p>
-                  <TooltipProvider>
-                    <Tooltip>
-                      <TooltipTrigger>
-                        <Info className="h-4 w-4 text-muted-foreground" />
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        <p>Your AWS IAM username</p>
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
-                </div>
-                <p className="font-mono mt-1">{credentials.username}</p>
-              </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => copyToClipboard(credentials.username, "Username")}
-              >
-                <Copy className="h-4 w-4" />
-              </Button>
-            </div>
-
-            <div className="flex items-center justify-between p-4 bg-muted rounded-lg">
-              <div className="flex-1">
-                <div className="flex items-center gap-2">
-                  <p className="text-sm text-muted-foreground">Password</p>
-                  <TooltipProvider>
-                    <Tooltip>
-                      <TooltipTrigger>
-                        <Info className="h-4 w-4 text-muted-foreground" />
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        <p>Password for AWS console login</p>
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
-                </div>
-                <p className="font-mono mt-1">{password}</p>
-              </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => copyToClipboard(password, "Password")}
-              >
-                <Copy className="h-4 w-4" />
-              </Button>
-            </div>
-          </div>
-
+      <Card className="max-w-2xl mx-auto p-6">
+        <div className="flex items-center justify-between mb-6">
+          <h1 className="text-2xl font-bold">AWS Lab Environment</h1>
           <Button
-            className="w-full bg-red-600 hover:bg-red-700 text-white mt-4 flex items-center justify-center gap-2"
+            variant="destructive"
+            size="sm"
             onClick={endLab}
+            className="flex items-center gap-2"
           >
             <LogOut className="h-4 w-4" />
             End Lab
           </Button>
+        </div>
 
-          <div className="pt-6">
-            <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-900/30 rounded-lg p-4">
-              <h3 className="font-medium text-yellow-800 dark:text-yellow-200 mb-2">Important Notes:</h3>
-              <ul className="list-disc pl-4 space-y-1 text-sm text-yellow-700 dark:text-yellow-300">
-                <li>These credentials will expire after 1 hour</li>
-                <li>Do not share these credentials with anyone</li>
-                <li>Save your work before the session expires</li>
-                <li>If the console button doesn't work, use the manual login instructions above</li>
-                <li>Click "End Lab" to properly terminate your session and log out</li>
-              </ul>
+        <div className="space-y-6">
+          {/* AWS Console Access */}
+          <div className="space-y-4">
+            <div className="flex justify-between items-center">
+              <h2 className="text-lg font-semibold">Console Access</h2>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={openAWSConsole}
+                className="flex items-center gap-2"
+              >
+                <ExternalLink className="h-4 w-4" />
+                Open Console
+              </Button>
             </div>
+
+            <div className="bg-muted p-4 rounded-lg">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-sm text-muted-foreground">Account ID</p>
+                  <div className="flex items-center gap-2 mt-1">
+                    <code className="font-mono text-sm">{credentials.accountId}</code>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6"
+                      onClick={() => copyToClipboard(credentials.accountId, "Account ID")}
+                    >
+                      <Copy className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Region</p>
+                  <p className="font-mono text-sm mt-1">{credentials.region}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Username</p>
+                  <div className="flex items-center gap-2 mt-1">
+                    <code className="font-mono text-sm">{credentials.username}</code>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6"
+                      onClick={() => copyToClipboard(credentials.username, "Username")}
+                    >
+                      <Copy className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">Password</p>
+                  <div className="flex items-center gap-2 mt-1">
+                    <code className="font-mono text-sm">{credentials.password}</code>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6"
+                      onClick={() => copyToClipboard(credentials.password, "Password")}
+                    >
+                      <Copy className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Access Keys */}
+          <Accordion type="single" collapsible className="w-full">
+            <AccordionItem value="access-keys">
+              <AccordionTrigger className="text-lg font-semibold">
+                Programmatic Access
+              </AccordionTrigger>
+              <AccordionContent>
+                <div className="space-y-4 p-4 bg-muted rounded-lg">
+                  <div>
+                    <p className="text-sm text-muted-foreground">Access Key ID</p>
+                    <div className="flex items-center gap-2 mt-1">
+                      <code className="font-mono text-sm">{credentials.accessKeyId}</code>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6"
+                        onClick={() => copyToClipboard(credentials.accessKeyId, "Access Key ID")}
+                      >
+                        <Copy className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                  <div>
+                    <p className="text-sm text-muted-foreground">Secret Access Key</p>
+                    <div className="flex items-center gap-2 mt-1">
+                      <code className="font-mono text-sm">{credentials.secretAccessKey}</code>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6"
+                        onClick={() => copyToClipboard(credentials.secretAccessKey, "Secret Access Key")}
+                      >
+                        <Copy className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              </AccordionContent>
+            </AccordionItem>
+          </Accordion>
+
+          {/* Resources */}
+          <div className="space-y-4">
+            <h2 className="text-lg font-semibold">Provisioned Resources</h2>
+            <div className="bg-muted p-4 rounded-lg">
+              <div className="flex items-center gap-2">
+                <Database className="h-4 w-4 text-muted-foreground" />
+                <p className="text-sm text-muted-foreground">S3 Bucket</p>
+              </div>
+              <div className="flex items-center gap-2 mt-1">
+                <code className="font-mono text-sm">{credentials.s3BucketName}</code>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6"
+                  onClick={() => copyToClipboard(credentials.s3BucketName, "S3 Bucket Name")}
+                >
+                  <Copy className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-900/30 rounded-lg p-4">
+            <h3 className="font-medium text-yellow-800 dark:text-yellow-200 mb-2">Important Notes:</h3>
+            <ul className="list-disc pl-4 space-y-1 text-sm text-yellow-700 dark:text-yellow-300">
+              <li>These credentials will expire after 1 hour</li>
+              <li>Do not share these credentials with anyone</li>
+              <li>Save your work before the session expires</li>
+              <li>Resources will be automatically cleaned up when you end the lab</li>
+              <li>Make sure to sign out of the AWS Console when you're done</li>
+            </ul>
           </div>
         </div>
       </Card>
@@ -407,7 +425,7 @@ Password: ${password}`;
           <DialogFooter className="sm:justify-center">
             <Button 
               type="button" 
-              onClick={completeLabEnd} 
+              onClick={completeLabEnd}
               className="bg-blue-600 hover:bg-blue-700 text-white"
             >
               I have signed out
