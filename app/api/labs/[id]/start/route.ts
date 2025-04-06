@@ -1,158 +1,87 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
+import { NextResponse } from 'next/server';
+import { getServerSession } from 'next-auth/next';
 import { authOptions } from "@/app/api/auth.config";
 import { PrismaClient } from "@prisma/client";
-import { 
-  getAvailableAccount,
-  provisionResources,
-  generateConsoleUrl
-} from "@/app/api/labs/terraform/executor";
+import { exec } from 'child_process';
+import { promisify } from 'util';
+import path from 'path';
 
 const prisma = new PrismaClient();
-
-// Add a simple in-memory lock to prevent concurrent requests from the same user
-const processingRequests = new Map<string, boolean>();
+const execAsync = promisify(exec);
 
 export async function POST(
-  request: NextRequest,
+  request: Request,
   { params }: { params: { id: string } }
 ) {
   try {
     const session = await getServerSession(authOptions);
     if (!session?.user?.email) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const userId = session.user.id;
-    const labId = params.id;
+    // Check for active lab sessions
+    const activeSessions = await prisma.labSession.count({
+      where: {
+        status: 'ACTIVE',
+      },
+    });
 
-    // Check if this user already has a request in progress
-    if (processingRequests.get(userId)) {
-      return NextResponse.json({ 
-        error: "Another request is already being processed", 
-        code: "CONCURRENT_REQUEST"
-      }, { status: 429 });
-    }
-    
-    // Mark this user as having a request in progress
-    processingRequests.set(userId, true);
-    
-    try {
-      // Check if user already has an active session in the database
-      const activeSession = await prisma.labSession.findFirst({
-        where: {
-          userId: userId,
-          status: "ACTIVE"
-        }
-      });
-
-      if (activeSession) {
-        // User already has an active session
-        const account = [
-          {
-            id: "124744987862",
-            username: "LabUser1",
-            region: "us-east-1",
-            accessKeyId: process.env.AWS_ACCESS_KEY_ID_LABUSER1!,
-            secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY_LABUSER1!,
-            terraformPath: "account1"
-          },
-          {
-            id: "104023954744", 
-            username: "LabUser2",
-            region: "us-east-1",
-            accessKeyId: process.env.AWS_ACCESS_KEY_ID_LABUSER2!,
-            secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY_LABUSER2!,
-            terraformPath: "account2"
-          }
-        ].find(acc => acc.id === activeSession.awsAccountId);
-        
-        if (!account) {
-          throw new Error("Associated AWS account not found");
-        }
-        
-        // Generate a console URL
-        const consoleUrl = await generateConsoleUrl(
-          account.region,
-          activeSession.aws_access_key_id || "",
-          activeSession.aws_secret_access_key || "", 
-          ""  // No session token for IAM users
-        );
-        
-        return NextResponse.json({
-          sessionId: activeSession.id,
-          credentials: {
-            accountId: account.id,
-            username: activeSession.awsUsername || account.username,
-            password: activeSession.password,
-            accessKeyId: activeSession.aws_access_key_id,
-            secretAccessKey: activeSession.aws_secret_access_key,
-            region: account.region,
-            consoleUrl
-          }
-        });
-      }
-
-      // Find an available AWS account
-      const availableAccount = await getAvailableAccount();
-
-      // Generate a unique session ID
-      const sessionId = crypto.randomUUID();
-
-      // Provision resources using Terraform
-      const resources = await provisionResources(
-        availableAccount,
-        userId,
-        labId,
-        sessionId
+    if (activeSessions >= 2) {
+      return NextResponse.json(
+        { error: 'Server is busy. Please try again later.' },
+        { status: 429 }
       );
-
-      // Generate console URL
-      const consoleUrl = await generateConsoleUrl(
-        resources.region,
-        resources.accessKeyId,
-        resources.secretAccessKey,
-        ""  // No session token for IAM users
-      );
-
-      // Create lab session
-      const labSession = await prisma.labSession.create({
-        data: {
-          id: sessionId,
-          labId,
-          userId: userId,
-          awsAccountId: availableAccount.id,
-          awsUsername: resources.username,
-          password: resources.password,
-          aws_access_key_id: resources.accessKeyId,
-          aws_secret_access_key: resources.secretAccessKey,
-          expiresAt: new Date(Date.now() + 3600 * 1000), // 1 hour from now
-          status: "ACTIVE"
-        }
-      });
-
-      return NextResponse.json({
-        sessionId: labSession.id,
-        credentials: {
-          accountId: availableAccount.id,
-          username: resources.username,
-          password: resources.password,
-          accessKeyId: resources.accessKeyId,
-          secretAccessKey: resources.secretAccessKey,
-          region: resources.region,
-          s3BucketName: resources.s3BucketName,
-          consoleUrl
-        }
-      });
-    } finally {
-      // Always clean up the lock when done
-      processingRequests.delete(userId);
     }
-  } catch (error: any) {
-    console.error("Error starting lab:", error);
-    return NextResponse.json({ 
-      error: "Failed to start lab", 
-      details: error?.message || "Unknown error" 
-    }, { status: 500 });
+
+    // Determine which account to use based on active sessions
+    const accountNumber = activeSessions + 1;
+    const terraformDir = path.join(process.cwd(), 'terraform', `account${accountNumber}`);
+    const accountId = accountNumber === 1 ? '124744987862' : '104023954744';
+
+    // Initialize and apply Terraform
+    await execAsync('terraform init', { cwd: terraformDir });
+    await execAsync('terraform apply -auto-approve', { cwd: terraformDir });
+
+    // Get outputs separately to handle sensitive values
+    const { stdout: userName } = await execAsync('terraform output -raw user_name', { cwd: terraformDir });
+    const { stdout: accessKeyId } = await execAsync('terraform output -raw access_key_id', { cwd: terraformDir });
+    const { stdout: secretAccessKey } = await execAsync('terraform output -raw secret_access_key', { cwd: terraformDir });
+    const { stdout: password } = await execAsync('terraform output -raw password', { cwd: terraformDir });
+    const { stdout: bucketName } = await execAsync('terraform output -raw bucket_name', { cwd: terraformDir });
+
+    // Create lab session in database
+    const labSession = await prisma.labSession.create({
+      data: {
+        labId: params.id,
+        userId: session.user.id,
+        awsAccountId: accountId,
+        awsUsername: userName.trim(),
+        aws_access_key_id: accessKeyId.trim(),
+        aws_secret_access_key: secretAccessKey.trim(),
+        password: password.trim(),
+        expiresAt: new Date(Date.now() + 3600000), // 1 hour from now
+        status: 'ACTIVE',
+      },
+    });
+
+    return NextResponse.json({
+      sessionId: labSession.id,
+      credentials: {
+        accountId: accountId,
+        username: userName.trim(),
+        password: password.trim(),
+        accessKeyId: accessKeyId.trim(),
+        secretAccessKey: secretAccessKey.trim(),
+        region: 'ap-south-1',
+        consoleUrl: `https://${accountId}.signin.aws.amazon.com/console`,
+        s3BucketName: bucketName.trim(),
+      },
+    });
+  } catch (error) {
+    console.error('Error starting lab:', error);
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'Failed to start lab environment' },
+      { status: 500 }
+    );
   }
 }

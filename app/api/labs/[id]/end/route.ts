@@ -1,91 +1,69 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
+import { NextResponse } from 'next/server';
+import { getServerSession } from 'next-auth/next';
 import { authOptions } from "@/app/api/auth.config";
 import { PrismaClient } from "@prisma/client";
-import { 
-  destroyResources
-} from "@/app/api/labs/terraform/executor";
+import { exec } from 'child_process';
+import { promisify } from 'util';
+import path from 'path';
 
 const prisma = new PrismaClient();
 
+const execAsync = promisify(exec);
+
 export async function POST(
-  request: NextRequest,
+  request: Request,
   { params }: { params: { id: string } }
 ) {
   try {
     const session = await getServerSession(authOptions);
     if (!session?.user?.email) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const userId = session.user.id;
-    const labId = params.id;
-    
-    // Parse the request body to get sessionId
     const body = await request.json();
     const { sessionId } = body;
-    
+
     if (!sessionId) {
-      return NextResponse.json({ error: "Session ID is required" }, { status: 400 });
+      return NextResponse.json(
+        { error: 'Session ID is required' },
+        { status: 400 }
+      );
     }
 
-    // Find the lab session
-    const labSession = await prisma.labSession.findFirst({
-      where: {
-        id: sessionId,
-        userId,
-        status: "ACTIVE"
-      }
+    // Get the lab session
+    const labSession = await prisma.labSession.findUnique({
+      where: { id: sessionId },
     });
 
     if (!labSession) {
-      return NextResponse.json({ error: "Lab session not found" }, { status: 404 });
+      return NextResponse.json(
+        { error: 'Lab session not found' },
+        { status: 404 }
+      );
     }
 
-    // Find the associated AWS account
-    const account = [
-      {
-        id: "124744987862",
-        username: "LabUser1",
-        region: "us-east-1",
-        accessKeyId: process.env.AWS_ACCESS_KEY_ID_LABUSER1!,
-        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY_LABUSER1!,
-        terraformPath: "account1"
-      },
-      {
-        id: "104023954744", 
-        username: "LabUser2",
-        region: "us-east-1",
-        accessKeyId: process.env.AWS_ACCESS_KEY_ID_LABUSER2!,
-        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY_LABUSER2!,
-        terraformPath: "account2"
-      }
-    ].find(acc => acc.id === labSession.awsAccountId);
-    
-    if (!account) {
-      throw new Error("Associated AWS account not found");
-    }
+    // Determine which account was used
+    const accountNumber = labSession.awsAccountId.includes('1') ? 1 : 2;
+    const terraformDir = path.join(process.cwd(), 'terraform', `account${accountNumber}`);
 
-    // Destroy the resources
-    await destroyResources(
-      account,
-      userId,
-      labId,
-      sessionId
-    );
+    // Destroy Terraform resources
+    await execAsync('terraform destroy -auto-approve', { cwd: terraformDir });
 
-    // Update the lab session status
+    // Update lab session status
     await prisma.labSession.update({
       where: { id: sessionId },
-      data: { status: "ENDED" }
+      data: {
+        status: 'ENDED',
+        endedAt: new Date(),
+      },
     });
 
-    return NextResponse.json({ message: "Lab session ended successfully" });
-  } catch (error: any) {
-    console.error("Error ending lab:", error);
-    return NextResponse.json({ 
-      error: "Failed to end lab", 
-      details: error?.message || "Unknown error" 
-    }, { status: 500 });
+    return NextResponse.json({ message: 'Lab environment destroyed successfully' });
+  } catch (error) {
+    console.error('Error ending lab:', error);
+    return NextResponse.json(
+      { error: 'Failed to end lab environment' },
+      { status: 500 }
+    );
   }
 }
