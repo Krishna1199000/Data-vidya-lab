@@ -54,14 +54,29 @@ resource "aws_iam_user_policy" "lab_user_policy" {
       {
         Effect = "Allow"
         Action = [
-          "s3:*",
+          "s3:*"
+        ]
+        Resource = [
+          "arn:aws:s3:::*", // Allow access to all buckets
+          "arn:aws:s3:::*/*" // And their contents
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:CreateBucket", 
+          "s3:ListAllMyBuckets"
+        ]
+        Resource = "*" // These actions need to be on all resources
+      },
+      {
+        Effect = "Allow"
+        Action = [
           "iam:GetAccountPasswordPolicy",
           "iam:ChangePassword",
           "iam:GetUser"
         ]
         Resource = [
-          aws_s3_bucket.lab_bucket.arn,
-          "${aws_s3_bucket.lab_bucket.arn}/*",
           "arn:aws:iam::*:user/$${aws:username}"
         ]
       }
