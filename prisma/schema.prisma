@@ -119,11 +119,15 @@ model LabSession {
   user                  User     @relation(fields: [userId], references: [id])
   userId                String
   awsAccountId          String
+  awsUsername           String
   password              String
-  awsUsername           String?  // Add this line
+  // Note: If these fields are causing issues, you have two options:
+  // Option 1: Keep them in the database model but make them optional
   aws_access_key_id     String?
   aws_secret_access_key String?
   aws_session_token     String?
+  // Option 2: Store all AWS credentials in a JSON field instead
+  // awsCredentials        Json?   
   expiresAt             DateTime @default(now())
   status                LabSessionStatus @default(ACTIVE)
   startedAt             DateTime @default(now())
@@ -136,8 +140,9 @@ model LabSession {
   @@index([status])
 }
 
-
 enum LabSessionStatus {
   ACTIVE
   ENDED
+  PENDING
+  FAILED
 }

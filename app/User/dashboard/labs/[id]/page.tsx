@@ -24,6 +24,7 @@ import { Badge } from "@/components/ui/badge"
 import { useSession } from "next-auth/react"
 import Link from "next/link"
 import Image from "next/image"
+import { useToast } from "@/components/ui/use-toast"
 
 import ErrorBoundary from "@/components/ui/error-boundary"
 
@@ -86,16 +87,28 @@ interface Lab {
   environmentImageAfter?: string
 }
 
-export default function LabPage({ params }: { params: Promise<{ id: string }> }) {
+// Define component props type
+interface LabPageProps {
+  params: Promise<{ id: string }>;
+}
+
+// Use React.FC and explicitly type props
+const LabPage: React.FC<LabPageProps> = ({ params }) => {
   const resolvedParams = use(params)
   const [lab, setLab] = useState<Lab | null>(null)
   const [loading, setLoading] = useState(true)
   const [authorProfile, setAuthorProfile] = useState<Profile | null>(null)
   const router = useRouter()
   const { status } = useSession()
+  const { toast } = useToast()
 
   const handleStartLab = () => {
-    router.push(`/User/dashboard/labs/${resolvedParams.id}/credentials`);
+    if (resolvedParams?.id) {
+      router.push(`/User/dashboard/labs/${resolvedParams.id}/credentials`);
+    } else {
+      console.error("Lab ID not resolved yet");
+      toast({ title: "Error", description: "Could not determine Lab ID.", variant: "destructive" });
+    }
   };
 
   useEffect(() => {
@@ -232,12 +245,11 @@ export default function LabPage({ params }: { params: Promise<{ id: string }> })
             </div>
             
             <Button 
-          onClick={handleStartLab}
-          className="bg-emerald-600 hover:bg-emerald-700 text-white"
-        >
-          Start Lab
-        </Button>
-            
+              onClick={handleStartLab}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+            >
+              Start Lab
+            </Button>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -584,3 +596,5 @@ export default function LabPage({ params }: { params: Promise<{ id: string }> })
     </ErrorBoundary>
   )
 }
+
+export default LabPage;

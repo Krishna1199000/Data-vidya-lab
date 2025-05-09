@@ -41,37 +41,59 @@ export default function LabCredentials({ params }: { params: { id: string } }) {
   const [showLogoutDialog, setShowLogoutDialog] = useState(false)
   const [endingLab, setEndingLab] = useState(false)
   const [destroyedUsername, setDestroyedUsername] = useState<string | null>(null)
-  const [logoutAttempted, setLogoutAttempted] = useState(false)
   const router = useRouter()
   const { toast } = useToast()
-  const startLabInProgress = useRef(false)
   const logoutTimer = useRef<NodeJS.Timeout | null>(null)
+  const startLabInProgress = useRef(false)
 
   useEffect(() => {
     if (!startLabInProgress.current) {
       startLab()
     }
 
-    const handleWindowMessage = (event: MessageEvent) => {
-      if (event.data === "aws-console-closed") {
-        toast({
-          title: "AWS Console",
-          description: "AWS Console window was closed",
-        })
-      }
-    }
-
-    window.addEventListener("message", handleWindowMessage)
-
     return () => {
-      window.removeEventListener("message", handleWindowMessage)
       if (logoutTimer.current) {
         clearTimeout(logoutTimer.current)
       }
     }
   }, [])
 
-  // Check if AWS console window is still open
+  const startLab = async () => {
+    if (startLabInProgress.current) return
+    startLabInProgress.current = true
+
+    try {
+      setLoading(true)
+      setError(null)
+      const response = await fetch(`/api/labs/${params.id}/start`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      })
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({ error: "Failed to parse error response from server." }))
+        throw new Error(data.error || `Failed to start lab: ${response.status}`)
+      }
+
+      const data: LabResponse = await response.json()
+
+      if (!data.sessionId || !data.credentials) {
+        throw new Error("Incomplete lab session data received from server")
+      }
+
+      setSessionId(data.sessionId)
+      setCredentials(data.credentials)
+    } catch (err) {
+      console.error("Error starting lab:", err)
+      setError(err instanceof Error ? err.message : "An unknown error occurred while starting the lab")
+    } finally {
+      setLoading(false)
+      startLabInProgress.current = false
+    }
+  }
+
   useEffect(() => {
     if (awsConsoleWindow) {
       const checkWindowInterval = setInterval(() => {
@@ -85,150 +107,18 @@ export default function LabCredentials({ params }: { params: { id: string } }) {
     }
   }, [awsConsoleWindow])
 
-  const startLab = async () => {
-    if (startLabInProgress.current) {
-      console.log("Start lab request already in progress, skipping")
-      return
-    }
-
-    startLabInProgress.current = true
-
-    try {
-      setLoading(true)
-      const response = await fetch(`/api/labs/${params.id}/start`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-      })
-
-      if (!response.ok) {
-        const data = await response.json()
-        throw new Error(data.error || `Failed to start lab: ${response.status}`)
-      }
-
-      const data: LabResponse = await response.json()
-      console.log("Lab session created successfully", data)
-
-      if (!data.sessionId) {
-        throw new Error("No session ID received from server")
-      }
-
-      setSessionId(data.sessionId)
-      setCredentials(data.credentials)
-    } catch (err) {
-      console.error("Error starting lab:", err)
-      setError(err instanceof Error ? err.message : "An error occurred")
-    } finally {
-      setLoading(false)
-      startLabInProgress.current = false
-    }
-  }
-
   const endLab = async () => {
     if (!sessionId) {
       toast({
         title: "Error",
-        description: "No active lab session found",
+        description: "No active lab session ID found. Cannot end lab.",
         variant: "destructive",
       })
       return
     }
-
+    
+    setEndingLab(true)
     try {
-      setEndingLab(true)
-      console.log("Ending lab session with ID:", sessionId)
-
-      toast({
-        title: "Ending Lab",
-        description: "Destroying AWS resources, please wait...",
-      })
-
-      // First, try to logout from AWS console if window is still open
-      if (awsConsoleWindow && !awsConsoleWindow.closed) {
-        setLogoutAttempted(true)
-        try {
-          // First attempt: Try to navigate to the logout page
-          awsConsoleWindow.location.href = "https://signin.aws.amazon.com/oauth?Action=logout"
-
-          // Second attempt: Try to execute logout script after a short delay
-          logoutTimer.current = setTimeout(() => {
-            if (awsConsoleWindow && !awsConsoleWindow.closed) {
-              try {
-                const logoutScript = `
-                  try {
-                    // Try different selectors for the logout button
-                    const logoutSelectors = [
-                      'a[data-testid="signout-link"]',
-                      '#nav-usernameMenu',
-                      '.awsc-switched-role-username-wrapper',
-                      '#aws-console-logout-link',
-                      'a[href*="logout"]'
-                    ];
-                    
-                    // First try to click the username menu to expose the logout option
-                    for (const selector of logoutSelectors) {
-                      const elements = document.querySelectorAll(selector);
-                      if (elements.length > 0) {
-                        console.log('Found element with selector:', selector);
-                        elements[0].click();
-                        break;
-                      }
-                    }
-                    
-                    // Wait a moment for the dropdown to appear
-                    setTimeout(() => {
-                      // Now try to find and click the logout link
-                      const logoutLinkSelectors = [
-                        'a[data-testid="signout-link"]',
-                        '#aws-console-logout-link',
-                        'a[href*="logout"]',
-                        'a:contains("Sign Out")',
-                        'a:contains("Logout")'
-                      ];
-                      
-                      for (const selector of logoutLinkSelectors) {
-                        try {
-                          const elements = document.querySelectorAll(selector);
-                          if (elements.length > 0) {
-                            console.log('Found logout link with selector:', selector);
-                            elements[0].click();
-                            return;
-                          }
-                        } catch (e) {
-                          console.error("Error with selector:", selector, e);
-                        }
-                      }
-                      
-                      // If we couldn't find a logout button, try to clear cookies
-                      document.cookie.split(";").forEach(function(c) {
-                        document.cookie = c.replace(/^ +/, "").replace(/=.*/, "=;expires=" + new Date().toUTCString() + ";path=/");
-                      });
-                      
-                      // Try to navigate to logout URL directly
-                      window.location.href = "https://signin.aws.amazon.com/oauth?Action=logout";
-                      
-                      // Notify the parent window
-                      window.opener.postMessage('aws-console-closed', '*');
-                    }, 500);
-                  } catch (e) {
-                    console.error("Logout script error:", e);
-                    // Last resort - try to navigate to logout URL
-                    window.location.href = "https://signin.aws.amazon.com/oauth?Action=logout";
-                  }
-                `
-                awsConsoleWindow.eval(logoutScript)
-              } catch (evalError) {
-                console.log("Could not execute logout script:", evalError)
-              }
-            }
-          }, 500)
-        } catch (windowErr) {
-          console.log("Could not automatically sign out of AWS console", windowErr)
-        }
-      }
-
-      // Now destroy the resources
       const response = await fetch(`/api/labs/${params.id}/end`, {
         method: "POST",
         headers: {
@@ -237,20 +127,19 @@ export default function LabCredentials({ params }: { params: { id: string } }) {
         body: JSON.stringify({ sessionId }),
       })
 
+      const data = await response.json()
+
       if (!response.ok) {
-        const data = await response.json()
-        throw new Error(data.error || "Failed to end lab")
+        throw new Error(data.error || "Failed to end lab session.")
       }
 
-      const data = await response.json()
-      setDestroyedUsername(data.username || credentials?.username || "")
-
+      setDestroyedUsername(data.username || credentials?.username || "unknown user")
       setShowLogoutDialog(true)
     } catch (err) {
       console.error("Error ending lab:", err)
       toast({
-        title: "Error",
-        description: err instanceof Error ? err.message : "An error occurred",
+        title: "Error Ending Lab",
+        description: err instanceof Error ? err.message : "An unknown error occurred.",
         variant: "destructive",
       })
     } finally {
@@ -259,167 +148,212 @@ export default function LabCredentials({ params }: { params: { id: string } }) {
   }
 
   const completeLabEnd = () => {
+    setShowLogoutDialog(false)
     toast({
-      title: "Success",
-      description: "Lab session ended successfully",
+      title: "Lab Ended",
+      description: "Lab session ended.",
     })
     router.push(`/User/dashboard/labs/${params.id}`)
   }
 
-  const copyToClipboard = (text: string, label: string) => {
+  const copyToClipboard = (text: string | undefined | null, label: string) => {
+    if (!text) return
     navigator.clipboard.writeText(text)
     toast({
-      title: "Copied!",
-      description: `${label} copied to clipboard`,
+      title: "Copied to clipboard",
+      description: `${label} copied.`,
     })
   }
 
   const openAWSConsole = () => {
-    if (credentials?.consoleUrl) {
-      const newWindow = window.open(credentials.consoleUrl, "_blank", "noopener,noreferrer")
-      if (newWindow) {
-        setAwsConsoleWindow(newWindow)
-      } else {
-        toast({
-          title: "Popup Blocked",
-          description: "Please allow popups to open the AWS Console",
-          variant: "destructive",
-        })
-      }
+    if (!credentials?.consoleUrl || credentials.consoleUrl === "#") return
+    const windowFeatures = "popup,width=1000,height=700"
+    const newWindow = window.open(credentials.consoleUrl, "_blank", windowFeatures)
+    if (newWindow) {
+      setAwsConsoleWindow(newWindow)
+      const checkClosed = setInterval(() => {
+        if (newWindow.closed) {
+          clearInterval(checkClosed)
+          setAwsConsoleWindow(null)
+        }
+      }, 1000)
+    } else {
+      toast({
+        title: "Popup Blocked",
+        description: "Please allow popups for this site to open the AWS Console.",
+        variant: "destructive",
+      })
     }
   }
 
   if (loading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
       </div>
     )
   }
 
   if (error) {
     return (
-      <div className="min-h-screen bg-background p-8">
-        <Card className="max-w-2xl mx-auto p-6">
-          <h1 className="text-2xl font-bold text-red-600 mb-4">Error</h1>
-          <p className="text-muted-foreground mb-6">{error}</p>
-          <Button onClick={() => router.back()}>Go Back</Button>
-        </Card>
+      <div className="min-h-screen bg-background flex items-center justify-center p-4">
+        <Alert variant="destructive" className="max-w-lg">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertTitle>Error Starting Lab</AlertTitle>
+          <AlertDescription>{error}</AlertDescription>
+          <div className="mt-4">
+            <Button onClick={() => router.back()} variant="secondary">Go Back</Button>
+          </div>
+        </Alert>
       </div>
     )
   }
 
   if (!credentials) {
-    return null
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center p-4">
+        <Alert variant="destructive" className="max-w-lg">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertTitle>Error</AlertTitle>
+          <AlertDescription>Credentials could not be loaded. Please try again.</AlertDescription>
+          <div className="mt-4">
+            <Button onClick={() => router.back()} variant="secondary">Go Back</Button>
+          </div>
+        </Alert>
+      </div>
+    )
   }
 
   return (
-    <div className="min-h-screen bg-background p-8">
-      <Card className="max-w-2xl mx-auto p-6">
-        <div className="flex items-center justify-between mb-6">
-          <h1 className="text-2xl font-bold">AWS Lab Environment</h1>
+    <div className="p-4 md:p-8">
+      <Card className="max-w-4xl mx-auto p-6">
+        <div className="flex justify-between items-start mb-6">
+          <h1 className="text-2xl font-semibold">Lab Environment Credentials</h1>
           <Button
             variant="destructive"
             size="sm"
             onClick={endLab}
             disabled={endingLab}
-            className="flex items-center gap-2"
           >
-            {endingLab ? (
-              <>
-                <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full mr-1"></div>
-                Ending...
-              </>
-            ) : (
-              <>
-                <LogOut className="h-4 w-4" />
-                End Lab
-              </>
-            )}
+            <LogOut className="mr-2 h-4 w-4" />
+            {endingLab ? "Ending..." : "End Lab"}
           </Button>
         </div>
 
-        <div className="space-y-6">
-          {/* AWS Console Access */}
-          <div className="space-y-4">
+        <div className="p-4 border rounded-lg mb-6">
+          <h2 className="text-lg font-medium mb-4">Credentials</h2>
+          <div className="space-y-3">
             <div className="flex justify-between items-center">
-              <h2 className="text-lg font-semibold">Console Access</h2>
-              <Button variant="outline" size="sm" onClick={openAWSConsole} className="flex items-center gap-2">
-                <ExternalLink className="h-4 w-4" />
-                Open Console
-              </Button>
-            </div>
-
-            <div className="bg-muted p-4 rounded-lg">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <p className="text-sm text-muted-foreground">Account ID</p>
-                  <div className="flex items-center gap-2 mt-1">
-                    <code className="font-mono text-sm">{credentials.accountId}</code>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-6 w-6"
-                      onClick={() => copyToClipboard(credentials.accountId, "Account ID")}
-                    >
-                      <Copy className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-                <div>
-                  <p className="text-sm text-muted-foreground">Region</p>
-                  <p className="font-mono text-sm mt-1">{credentials.region}</p>
-                </div>
-                <div>
-                  <p className="text-sm text-muted-foreground">Username</p>
-                  <div className="flex items-center gap-2 mt-1">
-                    <code className="font-mono text-sm">{credentials.username}</code>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-6 w-6"
-                      onClick={() => copyToClipboard(credentials.username, "Username")}
-                    >
-                      <Copy className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-                <div>
-                  <p className="text-sm text-muted-foreground">Password</p>
-                  <div className="flex items-center gap-2 mt-1">
-                    <code className="font-mono text-sm">{credentials.password}</code>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-6 w-6"
-                      onClick={() => copyToClipboard(credentials.password, "Password")}
-                    >
-                      <Copy className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
+              <span className="text-sm font-medium text-muted-foreground">Account ID:</span>
+              <div className="flex items-center gap-2">
+                <code className="text-sm bg-secondary px-2 py-1 rounded">{credentials.accountId}</code>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => copyToClipboard(credentials.accountId, "Account ID")}
+                >
+                  <Copy className="h-4 w-4" />
+                </Button>
               </div>
             </div>
+            <div className="flex justify-between items-center">
+              <span className="text-sm font-medium text-muted-foreground">Username:</span>
+              <div className="flex items-center gap-2">
+                <code className="text-sm bg-secondary px-2 py-1 rounded">{credentials.username}</code>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => copyToClipboard(credentials.username, "Username")}
+                >
+                  <Copy className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-sm font-medium text-muted-foreground">Password:</span>
+              <div className="flex items-center gap-2">
+                <code className="text-sm bg-secondary px-2 py-1 rounded">{credentials.password}</code>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => copyToClipboard(credentials.password, "Password")}
+                >
+                  <Copy className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-sm font-medium text-muted-foreground">Region:</span>
+              <div className="flex items-center gap-2">
+                <code className="text-sm bg-secondary px-2 py-1 rounded">{credentials.region}</code>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => copyToClipboard(credentials.region, "Region")}
+                >
+                  <Copy className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-sm font-medium text-muted-foreground">Access Key ID:</span>
+              <div className="flex items-center gap-2">
+                <code className="text-sm bg-secondary px-2 py-1 rounded">{credentials.accessKeyId}</code>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => copyToClipboard(credentials.accessKeyId, "Access Key ID")}
+                >
+                  <Copy className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-sm font-medium text-muted-foreground">Secret Access Key:</span>
+              <div className="flex items-center gap-2">
+                <code className="text-sm bg-secondary px-2 py-1 rounded">{credentials.secretAccessKey}</code>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => copyToClipboard(credentials.secretAccessKey, "Secret Access Key")}
+                >
+                  <Copy className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+            {credentials.s3BucketName && (
+              <div className="flex justify-between items-center">
+                <span className="text-sm font-medium text-muted-foreground">S3 Bucket:</span>
+                <div className="flex items-center gap-2">
+                  <code className="text-sm bg-secondary px-2 py-1 rounded">{credentials.s3BucketName}</code>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => copyToClipboard(credentials.s3BucketName, "S3 Bucket Name")}
+                  >
+                    <Copy className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
+        </div>
 
-          <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-900/30 rounded-lg p-4">
-            <h3 className="font-medium text-yellow-800 dark:text-yellow-200 mb-2">Important Notes:</h3>
-            <ul className="list-disc pl-4 space-y-1 text-sm text-yellow-700 dark:text-yellow-300">
-              <li>These credentials will expire after 1 hour</li>
-              <li>Do not share these credentials with anyone</li>
-              <li>Save your work before the session expires</li>
-              <li>Resources will be automatically cleaned up when you end the lab</li>
-              <li>Make sure to sign out of the AWS Console when you're done</li>
-            </ul>
-          </div>
+        <div className="p-4 border rounded-lg">
+          <h2 className="text-lg font-medium mb-4">AWS Console</h2>
+          <Button onClick={openAWSConsole}>
+            <ExternalLink className="mr-2 h-4 w-4" />
+            Open AWS Console
+          </Button>
+          {awsConsoleWindow && !awsConsoleWindow.closed && (
+            <p className="text-xs text-muted-foreground mt-2">Console window is open.</p>
+          )}
         </div>
       </Card>
 
-      {/* Logout Dialog */}
       <Dialog
         open={showLogoutDialog}
         onOpenChange={(open) => {
-          // Prevent closing the dialog by clicking outside
           if (!open && destroyedUsername) {
             return
           }
@@ -428,38 +362,13 @@ export default function LabCredentials({ params }: { params: { id: string } }) {
       >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Lab Environment Destroyed</DialogTitle>
+            <DialogTitle>Lab Ended Confirmation</DialogTitle>
             <DialogDescription>
-              Your lab has been ended and the IAM user <strong>{destroyedUsername}</strong> has been destroyed.
+              Resources for user <code className="text-sm bg-secondary px-1 rounded">{destroyedUsername || '...'}</code> should be destroyed. Please ensure you have signed out of the AWS console if the window was left open.
             </DialogDescription>
           </DialogHeader>
-
-          {logoutAttempted && awsConsoleWindow && !awsConsoleWindow.closed && (
-            <Alert variant="warning" className="my-2">
-              <AlertTriangle className="h-4 w-4" />
-              <AlertTitle>AWS Console Still Open</AlertTitle>
-              <AlertDescription>
-                The AWS Console window is still open. Please manually sign out and close it.
-              </AlertDescription>
-            </Alert>
-          )}
-
-          <div className="bg-muted p-4 rounded-lg my-4">
-            <h3 className="font-medium mb-2">To ensure complete logout from AWS Console:</h3>
-            <ol className="list-decimal pl-5 space-y-1 text-sm">
-              <li>Go to your AWS Console window</li>
-              <li>Click on your username in the top right corner</li>
-              <li>Select "Sign Out"</li>
-              <li>Close the AWS Console window</li>
-            </ol>
-            <div className="mt-3 flex items-center justify-center">
-              <LogOut className="h-6 w-6 text-red-500" />
-            </div>
-          </div>
-          <DialogFooter className="sm:justify-center">
-            <Button type="button" onClick={completeLabEnd} className="bg-blue-600 hover:bg-blue-700 text-white">
-              I have signed out
-            </Button>
+          <DialogFooter>
+            <Button onClick={completeLabEnd}>OK</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
