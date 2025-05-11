@@ -50,6 +50,10 @@ next-env.d.ts
 # Terraform working directory (already present)
 .terraform/
 
+# Terraform generated files for lab sessions
+terraform/generated/
+terraform/generated/**/*
+
 # Crash log files
 crash.log
 crash.*.log
