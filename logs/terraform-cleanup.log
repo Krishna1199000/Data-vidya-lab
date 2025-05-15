@@ -1,0 +1,18 @@
+2025-05-14T12:39:45.101Z - Starting scheduled cleanup of Terraform directories
+2025-05-14T12:39:45.113Z - Attempting to terminate terraform provider processes...
+2025-05-14T12:39:45.467Z - Scanning temporary directory: C:\Users\Manav\AppData\Local\Temp
+2025-05-14T12:39:45.518Z - Found 13 Terraform directories
+2025-05-14T12:39:45.520Z - Deleting directory C:\Users\Manav\AppData\Local\Temp\terraform-lab-6ECEno (15.22 hours old)
+2025-05-14T12:39:45.568Z - Deleting directory C:\Users\Manav\AppData\Local\Temp\terraform-lab-A22pwB (15.24 hours old)
+2025-05-14T12:39:45.661Z - Deleting directory C:\Users\Manav\AppData\Local\Temp\terraform-lab-AG942O (1.50 hours old)
+2025-05-14T12:39:45.682Z - Deleting directory C:\Users\Manav\AppData\Local\Temp\terraform-lab-bwz4xw (14.99 hours old)
+2025-05-14T12:39:45.703Z - Deleting directory C:\Users\Manav\AppData\Local\Temp\terraform-lab-gi9SQp (14.79 hours old)
+2025-05-14T12:39:45.720Z - Deleting directory C:\Users\Manav\AppData\Local\Temp\terraform-lab-GnYjq1 (1.47 hours old)
+2025-05-14T12:39:45.740Z - Deleting directory C:\Users\Manav\AppData\Local\Temp\terraform-lab-gSpNU7 (13.14 hours old)
+2025-05-14T12:39:45.753Z - Deleting directory C:\Users\Manav\AppData\Local\Temp\terraform-lab-gwvtBw (12.64 hours old)
+2025-05-14T12:39:45.763Z - Deleting directory C:\Users\Manav\AppData\Local\Temp\terraform-lab-i9b5fi (12.63 hours old)
+2025-05-14T12:39:45.775Z - Deleting directory C:\Users\Manav\AppData\Local\Temp\terraform-lab-Jqj7Gh (14.89 hours old)
+2025-05-14T12:39:45.787Z - Deleting directory C:\Users\Manav\AppData\Local\Temp\terraform-lab-KtewFL (13.36 hours old)
+2025-05-14T12:39:45.803Z - Deleting directory C:\Users\Manav\AppData\Local\Temp\terraform-lab-XYLwGm (13.73 hours old)
+2025-05-14T12:39:45.861Z - Deleting directory C:\Users\Manav\AppData\Local\Temp\terraform-lab-YGbkCl (15.15 hours old)
+2025-05-14T12:39:45.908Z - Cleanup completed: 13 directories deleted, 0 failed

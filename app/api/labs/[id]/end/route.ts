@@ -1,111 +1,276 @@
-import { NextRequest, NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/app/api/auth.config";
-import { PrismaClient } from "@prisma/client";
-import path from "path";
-import fs from "fs/promises";
+import { NextResponse } from "next/server"
+import { getServerSession } from "next-auth/next"
+import { authOptions } from "@/app/api/auth.config"
+import { PrismaClient } from "@prisma/client"
+import { exec } from "child_process"
+import { promisify } from "util"
+import path from "path"
+import fs from "fs"
+import {
+  IAMClient,
+  DeleteUserCommand,
+  DeleteAccessKeyCommand,
+  DeleteLoginProfileCommand,
+  ListAccessKeysCommand,
+  ListUserPoliciesCommand,
+  DeleteUserPolicyCommand,
+  ListAttachedUserPoliciesCommand,
+  DetachUserPolicyCommand,
+} from "@aws-sdk/client-iam"
+import { S3Client, DeleteBucketCommand, ListObjectsV2Command, DeleteObjectCommand } from "@aws-sdk/client-s3"
 
-const prisma = new PrismaClient();
+const prisma = new PrismaClient()
+const execAsync = promisify(exec)
 
-// Function to clean up the lab session resources
-async function cleanupLabResources(accountId: string, userId: string, labId: string, dirName: string): Promise<string> {
+export async function POST(request: Request) {
   try {
-    const terraformDir = path.join(process.cwd(), "terraform");
-    const userResourceDir = path.join(terraformDir, "generated", dirName);
-    
-    console.log(`Cleaning up resources for session in directory: ${dirName}`);
-    
-    // Check if the directory exists
-    let directoryExists = false;
-    try {
-      await fs.access(userResourceDir);
-      directoryExists = true;
-    } catch {
-      console.error(`Resource directory for ${dirName} not found`);
-      return `Resource directory not found for ${dirName}`;
-    }
-    
-    if (!directoryExists) {
-      return `Resource directory not found for ${dirName}`;
-    }
-    
-    // Clean up the resource directory
-    try {
-      await fs.rm(userResourceDir, { recursive: true, force: true });
-      console.log(`Deleted resource directory at ${userResourceDir}`);
-    } catch (err) {
-      console.warn(`Could not delete resource directory: ${err}`);
-      // Continue even if deletion fails
-    }
-    
-    return `Successfully cleaned up resources for ${dirName}`;
-  } catch (error) {
-    console.error("Error cleaning up resources:", error);
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    throw new Error(`Resource cleanup failed: ${errorMessage}`);
-  }
-}
-
-export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
-  try {
-    const session = await getServerSession(authOptions);
+    const session = await getServerSession(authOptions)
     if (!session?.user?.email) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
-    const userId = session.user.id;
-    const labId = params.id;
-    
-    // Find the active session for this lab and user
-    const activeSession = await prisma.labSession.findFirst({
-      where: {
-        labId,
-        userId,
-        status: "ACTIVE"
-      }
-    });
-    
-    if (!activeSession) {
-      return NextResponse.json({ error: "No active session found for this lab" }, { status: 404 });
+    const body = await request.json()
+    const { sessionId } = body
+
+    if (!sessionId) {
+      return NextResponse.json({ error: "Session ID is required" }, { status: 400 })
     }
-    
-    // Use the stored directory name from the database for cleanup
-    const dirName = activeSession.aws_access_key_id || 
-                    `lab-user-${labId.substring(0, 4)}-${userId.substring(0, 4)}`;
-    
-    console.log(`Found resource directory for lab session: ${dirName}`);
-    
-    // Clean up resources
-    let cleanupOutput;
+
+    // Get the lab session
+    const labSession = await prisma.labSession.findUnique({
+      where: { id: sessionId },
+      select: {
+        id: true,
+        awsAccountId: true,
+        awsUsername: true,
+        status: true,
+        aws_access_key_id: true,
+        aws_secret_access_key: true,
+      },
+    })
+
+    if (!labSession) {
+      return NextResponse.json({ error: "Lab session not found" }, { status: 404 })
+    }
+
+    if (labSession.status === "ENDED") {
+      return NextResponse.json({ message: "Lab session already ended", username: labSession.awsUsername })
+    }
+
+    // Determine which account was used - FIX HERE
+    // Check the username prefix instead of the account ID
+    const accountNumber = labSession.awsUsername?.startsWith("student2-") ? "2" : "1"
+    const terraformDir = path.join(process.cwd(), "terraform", `account${accountNumber}`)
+
+    console.log(`Ending lab for user ${labSession.awsUsername} in account ${accountNumber}`)
+
+    // Try Terraform destroy first
+    let terraformSuccess = false
     try {
-      console.log(`Ending lab session with ID: ${activeSession.id} for directory ${dirName}`);
-      cleanupOutput = await cleanupLabResources(activeSession.awsAccountId, userId, labId, dirName);
-    } catch (error) {
-      console.error("Error cleaning up resources:", error);
-      cleanupOutput = `Error cleaning up resources: ${error instanceof Error ? error.message : String(error)}`;
-      // Continue ending the session even if cleanup fails
+      if (fs.existsSync(terraformDir)) {
+        console.log(`Attempting Terraform destroy in ${terraformDir}`)
+
+        // Set AWS credentials for Terraform as environment variables
+        const env = {
+          ...process.env,
+          AWS_ACCESS_KEY_ID: process.env[`AWS_ACCESS_KEY_ID_LABUSER${accountNumber}`],
+          AWS_SECRET_ACCESS_KEY: process.env[`AWS_SECRET_ACCESS_KEY_LABUSER${accountNumber}`],
+          TF_VAR_username: labSession.awsUsername || undefined,
+        }
+
+        const { stdout, stderr } = await execAsync("terraform destroy -auto-approve", {
+          cwd: terraformDir,
+          env,
+          timeout: 300000, // 5 minute timeout
+        })
+
+        console.log("Terraform destroy stdout:", stdout)
+        if (stderr) console.error("Terraform destroy stderr:", stderr)
+
+        // Check if resources were destroyed
+        terraformSuccess = !stdout.includes("No objects need to be destroyed")
+      } else {
+        console.log(`Terraform directory not found: ${terraformDir}`)
+      }
+    } catch (terraformError) {
+      console.error("Error during terraform destroy:", terraformError)
+      // Continue with AWS SDK cleanup
     }
-    
-    // Update the session status to ENDED
-    const updatedSession = await prisma.labSession.update({
-      where: { id: activeSession.id },
+
+    // If Terraform didn't succeed, use AWS SDK directly
+    if (!terraformSuccess) {
+      console.log("Terraform destroy did not succeed, using AWS SDK directly")
+
+      try {
+        // Create IAM and S3 clients with proper credentials
+        // Map account number to the correct environment variable names
+        const credentials = {
+          "1": {
+            accessKeyId: process.env.AWS_ACCESS_KEY_ID_LABUSER1 || '',
+            secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY_LABUSER1 || '',
+          },
+          "2": {
+            accessKeyId: process.env.AWS_ACCESS_KEY_ID_LABUSER2 || '',
+            secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY_LABUSER2 || '',
+          },
+        }
+
+        const awsConfig = {
+          region: "ap-south-1",
+          credentials: credentials[accountNumber as "1" | "2"],
+        }
+
+        // Validate credentials before proceeding
+        if (!awsConfig.credentials.accessKeyId || !awsConfig.credentials.secretAccessKey) {
+          throw new Error(
+            `Missing AWS credentials for account ${accountNumber}. Please check environment variables AWS_ACCESS_KEY_ID_LABUSER${accountNumber} and AWS_SECRET_ACCESS_KEY_LABUSER${accountNumber}`,
+          )
+        }
+
+        const iamClient = new IAMClient(awsConfig)
+        const s3Client = new S3Client(awsConfig)
+
+        const username = labSession.awsUsername
+        if (!username) {
+          throw new Error("Username is required")
+        }
+
+        // Extract bucket name from username (based on your naming convention)
+        // FIX HERE - Use the correct bucket prefix based on the account number
+        const bucketPrefix = accountNumber === "1" ? "lab1-" : "lab2-"
+        const usernameParts = username.split("-")
+        const bucketSuffix = usernameParts.length > 1 ? usernameParts[1] : ""
+        const bucketName = `${bucketPrefix}${bucketSuffix}`
+
+        console.log(`Attempting to clean up bucket: ${bucketName}`)
+
+        // 1. Empty and delete S3 bucket if it exists
+        try {
+          // List objects in the bucket
+          const listObjectsResponse = await s3Client.send(new ListObjectsV2Command({ Bucket: bucketName }))
+
+          // Delete all objects
+          if (listObjectsResponse.Contents) {
+            for (const object of listObjectsResponse.Contents) {
+              if (object.Key) {
+                await s3Client.send(
+                  new DeleteObjectCommand({
+                    Bucket: bucketName,
+                    Key: object.Key,
+                  }),
+                )
+                console.log(`Deleted object: ${object.Key}`)
+              }
+            }
+          }
+
+          // Delete the bucket
+          await s3Client.send(new DeleteBucketCommand({ Bucket: bucketName }))
+          console.log(`Deleted bucket: ${bucketName}`)
+        } catch (s3Error) {
+          console.error(`Error cleaning up S3 bucket: ${s3Error}`)
+          // Continue with IAM cleanup
+        }
+
+        console.log(`Attempting to clean up IAM user: ${username}`)
+
+        // 2. Clean up IAM user
+        try {
+          // List and delete user policies
+          const userPoliciesResponse = await iamClient.send(new ListUserPoliciesCommand({ UserName: username }))
+
+          if (userPoliciesResponse.PolicyNames) {
+            for (const policyName of userPoliciesResponse.PolicyNames) {
+              await iamClient.send(
+                new DeleteUserPolicyCommand({
+                  UserName: username,
+                  PolicyName: policyName,
+                }),
+              )
+              console.log(`Deleted inline policy: ${policyName}`)
+            }
+          }
+
+          // List and detach managed policies
+          const attachedPoliciesResponse = await iamClient.send(
+            new ListAttachedUserPoliciesCommand({ UserName: username }),
+          )
+
+          if (attachedPoliciesResponse.AttachedPolicies) {
+            for (const policy of attachedPoliciesResponse.AttachedPolicies) {
+              if (policy.PolicyArn) {
+                await iamClient.send(
+                  new DetachUserPolicyCommand({
+                    UserName: username,
+                    PolicyArn: policy.PolicyArn,
+                  }),
+                )
+                console.log(`Detached managed policy: ${policy.PolicyName}`)
+              }
+            }
+          }
+
+          // List and delete access keys
+          if (!username) {
+            throw new Error("Username is required for listing access keys")
+          }
+          const accessKeysResponse = await iamClient.send(new ListAccessKeysCommand({ UserName: username }))
+
+          if (accessKeysResponse.AccessKeyMetadata) {
+            for (const key of accessKeysResponse.AccessKeyMetadata) {
+              if (key.AccessKeyId) {
+                await iamClient.send(
+                  new DeleteAccessKeyCommand({
+                    UserName: username,
+                    AccessKeyId: key.AccessKeyId,
+                  }),
+                )
+                console.log(`Deleted access key: ${key.AccessKeyId}`)
+              }
+            }
+          }
+
+          // Delete login profile
+          try {
+            if (username) {
+              await iamClient.send(new DeleteLoginProfileCommand({ UserName: username }))
+            }
+            console.log(`Deleted login profile for user: ${username}`)
+          } catch (loginProfileError) {
+            console.error(`Error deleting login profile: ${loginProfileError}`)
+            // Continue with user deletion
+          }
+
+          // Finally delete the user
+          await iamClient.send(new DeleteUserCommand({ UserName: username }))
+          console.log(`Deleted IAM user: ${username}`)
+        } catch (iamError) {
+          console.error(`Error cleaning up IAM user: ${iamError}`)
+        }
+      } catch (awsSdkError) {
+        console.error("Error using AWS SDK for cleanup:", awsSdkError)
+      }
+    }
+
+    // Update lab session status regardless of cleanup success
+    await prisma.labSession.update({
+      where: { id: sessionId },
       data: {
         status: "ENDED",
-        endedAt: new Date()
-      }
-    });
-    
+        endedAt: new Date(),
+      },
+    })
+
     return NextResponse.json({
-      message: "Lab session ended successfully",
-      sessionId: updatedSession.id,
-      cleanupOutput
-    });
-    
+      message: "Lab environment destroyed successfully",
+      username: labSession.awsUsername,
+      terraformSuccess,
+    })
   } catch (error) {
-    console.error("Error ending lab:", error instanceof Error ? error.message : "Unknown error");
-    return NextResponse.json({ 
-      error: "Failed to end lab", 
-      details: error instanceof Error ? error.message : "Unknown error" 
-    }, { status: 500 });
+    console.error("Error ending lab:", error)
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Failed to end lab environment" },
+      { status: 500 },
+    )
   }
 }

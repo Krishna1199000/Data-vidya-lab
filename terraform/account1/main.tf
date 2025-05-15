@@ -1,107 +1,106 @@
-# Account 1 Terraform Configuration
-
-provider "aws" {
-  region = var.aws_region
-}
-
-# Variables for Account 1
-variable "aws_region" {
-  description = "AWS region for resources"
-  type        = string
-}
-
-variable "account_id" {
-  description = "AWS Account ID"
-  type        = string
-}
-
-variable "lab_user_name" {
-  description = "Username for lab user"
-  type        = string
-  default     = "LabUser1"
-}
-
-variable "environment" {
-  description = "Environment (dev, staging, prod)"
-  type        = string
-}
-
-variable "lab_user_password" {
-  description = "Password for lab user"
-  type        = string
-  default     = "Lab@User123"
-}
-
-# Create IAM user for lab access
-resource "aws_iam_user" "lab_user" {
-  name = var.lab_user_name
-  path = "/lab-users/"
-  
-  tags = {
-    Environment = var.environment
-    Purpose     = "Lab Access"
-    ManagedBy   = "Terraform"
+terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
   }
 }
 
-# Create access key for programmatic access
+provider "aws" {
+  profile = "labuser1"
+  region  = "ap-south-1"
+}
+
+resource "random_string" "suffix" {
+  length  = 8
+  special = false
+  upper   = false
+}
+
+resource "random_password" "user_password" {
+  length           = 16
+  special          = true
+  override_special = "!@#$%^&*"
+  min_special      = 2
+  min_upper        = 2
+  min_lower        = 2
+  min_numeric      = 2
+}
+
+resource "aws_iam_user" "lab_user" {
+  name = "student1-${random_string.suffix.result}"
+  path = "/lab-users/"
+  force_destroy = true
+}
+
+resource "aws_iam_user_login_profile" "lab_user_login" {
+  user                    = aws_iam_user.lab_user.name
+  password_reset_required = false
+  password_length        = 20
+}
+
 resource "aws_iam_access_key" "lab_user_key" {
   user = aws_iam_user.lab_user.name
 }
 
-# Create basic lab policy for permissions
-resource "aws_iam_policy" "lab_policy" {
-  name        = "${var.lab_user_name}Policy"
-  description = "Policy for lab user ${var.lab_user_name}"
-  
+resource "aws_iam_user_policy" "lab_user_policy" {
+  name = "lab_access"
+  user = aws_iam_user.lab_user.name
+
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
+        Effect = "Allow"
         Action = [
-          "s3:ListAllMyBuckets",
-          "ec2:DescribeInstances",
-          "ec2:DescribeImages",
-          "ec2:DescribeTags",
-          "ec2:DescribeSnapshots"
+          "s3:",
+          "iam:GetAccountPasswordPolicy",
+          "iam:ChangePassword",
+          "iam:GetUser"
         ]
-        Effect   = "Allow"
-        Resource = "*"
+        Resource = [
+          aws_s3_bucket.lab_bucket.arn,
+          "${aws_s3_bucket.lab_bucket.arn}/",
+          "arn:aws:iam::*:user/$${aws:username}"
+        ]
       }
     ]
   })
 }
 
-# Attach policy to lab user
-resource "aws_iam_user_policy_attachment" "lab_user_policy_attachment" {
-  user       = aws_iam_user.lab_user.name
-  policy_arn = aws_iam_policy.lab_policy.arn
+resource "aws_s3_bucket" "lab_bucket" {
+  bucket = "lab1-${random_string.suffix.result}"
+  force_destroy = true
 }
 
-# Store lab user login profile (password) for console access
-resource "aws_iam_user_login_profile" "lab_user_login" {
-  user                    = aws_iam_user.lab_user.name
-  password_reset_required = false
-  pgp_key                 = null
-  
-  # Set fixed password directly
-  password                = var.lab_user_password
+resource "aws_s3_bucket_public_access_block" "lab_bucket" {
+  bucket = aws_s3_bucket.lab_bucket.id
 
-  lifecycle {
-    ignore_changes = [password_length, pgp_key]
-  }
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
 }
 
-# Outputs for the module
-output "account_details" {
-  description = "Account configuration details"
-  value = {
-    account_id       = var.account_id
-    region           = var.aws_region
-    username         = aws_iam_user.lab_user.name
-    access_key       = aws_iam_access_key.lab_user_key.id
-    secret_key       = aws_iam_access_key.lab_user_key.secret
-    console_password = aws_iam_user_login_profile.lab_user_login.password
-  }
+output "user_name" {
+  value = aws_iam_user.lab_user.name
+}
+
+output "access_key_id" {
+  value = aws_iam_access_key.lab_user_key.id
+}
+
+output "secret_access_key" {
+  value     = aws_iam_access_key.lab_user_key.secret
   sensitive = true
-} 
+}
+
+output "password" {
+  value     = aws_iam_user_login_profile.lab_user_login.password
+  sensitive = true
+}
+
+output "bucket_name" {
+  value = aws_s3_bucket.lab_bucket.id
+}

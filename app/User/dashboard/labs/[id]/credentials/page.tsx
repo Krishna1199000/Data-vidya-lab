@@ -4,9 +4,14 @@ import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Copy, ExternalLink, LogOut, Database, RefreshCw } from "lucide-react";
+import { Copy, Info, ExternalLink, LogOut, Database } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
-
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import {
   Dialog,
   DialogContent,
@@ -28,10 +33,14 @@ interface Credentials {
   password: string;
   accessKeyId: string;
   secretAccessKey: string;
-  sessionToken?: string;
   region: string;
   consoleUrl: string;
-  s3BucketName?: string;
+  s3BucketName: string;
+}
+
+interface LabResponse {
+  sessionId: string;
+  credentials: Credentials;
 }
 
 export default function LabCredentials({ params }: { params: { id: string } }) {
@@ -41,45 +50,9 @@ export default function LabCredentials({ params }: { params: { id: string } }) {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [awsConsoleWindow, setAwsConsoleWindow] = useState<Window | null>(null);
   const [showLogoutDialog, setShowLogoutDialog] = useState(false);
-  const [retryCount, setRetryCount] = useState(0);
   const router = useRouter();
   const { toast } = useToast();
   const startLabInProgress = useRef(false);
-  const maxRetries = 3;
-  const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
-
-  const checkBucketDirectly = async () => {
-    if (!sessionId) return;
-    
-    try {
-      console.log("Performing direct bucket check with session ID:", sessionId);
-      const response = await fetch(`/api/labs/${params.id}/bucket-check`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ sessionId }),
-      });
-      
-      if (!response.ok) {
-        const data = await response.json();
-        console.warn("Bucket check error:", data);
-        return false;
-      }
-      
-      const data = await response.json();
-      if (data.credentials) {
-        console.log("Bucket check found credentials:", data.credentials);
-        setCredentials(data.credentials);
-        return true;
-      }
-      
-      return false;
-    } catch (error) {
-      console.error("Error during direct bucket check:", error);
-      return false;
-    }
-  };
 
   useEffect(() => {
     if (!startLabInProgress.current) {
@@ -99,35 +72,8 @@ export default function LabCredentials({ params }: { params: { id: string } }) {
     
     return () => {
       window.removeEventListener('message', handleWindowMessage);
-      // Clean up any polling intervals
-      if (pollingIntervalRef.current) {
-        clearInterval(pollingIntervalRef.current);
-      }
     };
-  }, [retryCount]);
-
-  // Add new effect for bucket check when stuck in loading state
-  useEffect(() => {
-    // If we have a session ID but no credentials, and we're not loading, try direct bucket check
-    if (sessionId && !credentials && !loading) {
-      let bucketCheckTimer: NodeJS.Timeout;
-      
-      const performBucketCheck = async () => {
-        const success = await checkBucketDirectly();
-        if (!success) {
-          // Schedule another check in 5 seconds
-          bucketCheckTimer = setTimeout(performBucketCheck, 5000);
-        }
-      };
-      
-      // Start bucket checks
-      performBucketCheck();
-      
-      return () => {
-        if (bucketCheckTimer) clearTimeout(bucketCheckTimer);
-      };
-    }
-  }, [sessionId, credentials, loading]);
+  }, []);
 
   const startLab = async () => {
     if (startLabInProgress.current) {
@@ -136,11 +82,9 @@ export default function LabCredentials({ params }: { params: { id: string } }) {
     }
     
     startLabInProgress.current = true;
-    setLoading(true);
-    setError(null);
     
     try {
-      console.log("Starting lab with params:", params.id);
+      setLoading(true);
       const response = await fetch(`/api/labs/${params.id}/start`, {
         method: "POST",
         headers: {
@@ -150,276 +94,24 @@ export default function LabCredentials({ params }: { params: { id: string } }) {
 
       if (!response.ok) {
         const data = await response.json();
-        
-        // Handle specific error cases
-        if (data.code === "CONCURRENT_REQUEST") {
-          console.log("Concurrent request detected, waiting and retrying");
-          setTimeout(() => {
-            startLabInProgress.current = false;
-            startLab();
-          }, 5000); // Wait 5 seconds before retrying
-          return;
-        }
-      
-        throw new Error(data.error || data.details || `Failed to start lab: ${response.status}`);
+        throw new Error(data.error || `Failed to start lab: ${response.status}`);
       }
 
-      const data = await response.json();
-      console.log("Lab session response:", data);
+      const data: LabResponse = await response.json();
+      console.log("Lab session created successfully", data);
 
       if (!data.sessionId) {
         throw new Error("No session ID received from server");
       }
 
       setSessionId(data.sessionId);
-      
-      // If we don't have credentials yet but have a session ID, poll for them
-      if (!data.credentials && data.sessionId) {
-        await pollForCredentials(data.sessionId);
-      } else if (data.credentials) {
-        console.log("Credentials received:", data.credentials);
-        setCredentials(data.credentials);
-      } else {
-        console.warn("No credentials in response");
-      }
+      setCredentials(data.credentials);
     } catch (err) {
       console.error("Error starting lab:", err);
-      const errorMessage = err instanceof Error ? err.message : "An error occurred";
-      
-      // Special handling for specific errors
-      if (errorMessage.includes("BucketAlreadyOwnedByYou") || 
-          errorMessage.includes("BucketAlreadyExists")) {
-        
-        // Try to recover by calling the check-status endpoint first
-        await checkLabStatus();
-      } else {
-        setError(errorMessage);
-      }
+      setError(err instanceof Error ? err.message : "An error occurred");
     } finally {
       setLoading(false);
       startLabInProgress.current = false;
-    }
-  };
-
-  const checkLabStatus = async () => {
-    try {
-      // Check if there's an existing session for this lab
-      const response = await fetch(`/api/labs/${params.id}/check-status`, {
-        method: "GET",
-        headers: {
-          "Content-Type": "application/json",
-        },
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || `Failed to check lab status: ${response.status}`);
-      }
-
-      // If we got back valid session data, use it
-      if (data.sessionId && data.credentials) {
-        console.log("Retrieved existing lab session", data);
-        setSessionId(data.sessionId);
-        setCredentials(data.credentials);
-        return true;
-      } else if (data.sessionId) {
-        // If we have a session ID but no credentials yet, poll for them
-        await pollForCredentials(data.sessionId);
-        return true;
-      }
-      
-      // If no session exists but we're getting bucket already exists errors,
-      // try a cleanup endpoint before retrying
-      const cleanupResponse = await fetch(`/api/labs/${params.id}/cleanup`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-      });
-
-      if (!cleanupResponse.ok) {
-        const cleanupData = await cleanupResponse.json();
-        console.warn("Cleanup warning:", cleanupData.error || "Unknown error during cleanup");
-      }
-      
-      // Increment retry count for next attempt
-      if (retryCount < maxRetries) {
-        toast({
-          title: "Retrying...",
-          description: "Cleaning up resources and retrying lab creation",
-        });
-        setRetryCount(prev => prev + 1);
-        return true;
-      }
-      
-      return false;
-    } catch (err) {
-      console.error("Error checking lab status:", err);
-      return false;
-    }
-  };
-
-  const pollForCredentials = async (sid: string) => {
-    let attempts = 0;
-    const maxPollAttempts = 30; // Increased from 20 to 30
-    
-    // Clear any existing polling interval
-    if (pollingIntervalRef.current) {
-      clearInterval(pollingIntervalRef.current);
-    }
-    
-    return new Promise<void>((resolve, reject) => {
-      console.log("Starting polling for credentials with session ID:", sid);
-      pollingIntervalRef.current = setInterval(async () => {
-        try {
-          attempts++;
-          console.log(`Polling attempt ${attempts}/${maxPollAttempts}`);
-          
-          if (attempts >= maxPollAttempts) {
-            if (pollingIntervalRef.current) {
-              clearInterval(pollingIntervalRef.current);
-            }
-            console.error("Polling timed out after maximum attempts");
-            
-            // Last resort attempt - direct account access fallback
-            try {
-              console.log("Attempting direct account access fallback...");
-              const fallbackResponse = await fetch(`/api/labs/${params.id}/fallback-credentials`, {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                },
-                body: JSON.stringify({ 
-                  sessionId: sid,
-                  bucketName: `lab-bucket-124744987862-${sid.substring(0, 8)}` 
-                }),
-              });
-              
-              if (fallbackResponse.ok) {
-                const fallbackData = await fallbackResponse.json();
-                if (fallbackData.credentials) {
-                  console.log("Fallback credentials received:", fallbackData.credentials);
-                  setCredentials(fallbackData.credentials);
-                  resolve();
-                  return;
-                }
-              }
-            } catch (fallbackErr) {
-              console.error("Fallback credentials attempt failed:", fallbackErr);
-            }
-            
-            reject(new Error("Timed out waiting for lab credentials"));
-            return;
-          }
-          
-          // First try the check-status endpoint (which should be the most reliable)
-          let response = await fetch(`/api/labs/${params.id}/check-status`, {
-            method: "GET",
-            headers: {
-              "Content-Type": "application/json",
-            },
-          });
-          
-          let data;
-          if (response.ok) {
-            data = await response.json();
-            console.log("Status check response:", data);
-            
-            if (data.credentials) {
-              console.log("Credentials received from status check:", data.credentials);
-              setCredentials(data.credentials);
-              if (pollingIntervalRef.current) {
-                clearInterval(pollingIntervalRef.current);
-              }
-              resolve();
-              return;
-            }
-          }
-          
-          // If check-status didn't work, try the dedicated status endpoint
-          response = await fetch(`/api/labs/${params.id}/status`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({ sessionId: sid }),
-          });
-          
-          if (!response.ok) {
-            const errorData = await response.json();
-            console.warn("Status endpoint error:", errorData);
-            // Continue polling despite error
-            return;
-          }
-          
-          data = await response.json();
-          console.log("Dedicated status endpoint response:", data);
-          
-          if (data.credentials) {
-            console.log("Credentials received from polling:", data.credentials);
-            setCredentials(data.credentials);
-            if (pollingIntervalRef.current) {
-              clearInterval(pollingIntervalRef.current);
-            }
-            resolve();
-            return;
-          } else {
-            console.warn("No credentials in response, polling will continue");
-          }
-          
-          // If we've been polling for a while with no success, try to refresh credentials
-          if (attempts % 5 === 0 && attempts >= 10) {
-            console.log("Attempting to refresh credentials forcefully...");
-            const refreshResponse = await fetch(`/api/labs/${params.id}/refresh-credentials`, {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({ sessionId: sid }),
-            });
-            
-            if (refreshResponse.ok) {
-              const refreshData = await refreshResponse.json();
-              if (refreshData.credentials) {
-                console.log("Refresh returned credentials:", refreshData.credentials);
-                setCredentials(refreshData.credentials);
-                if (pollingIntervalRef.current) {
-                  clearInterval(pollingIntervalRef.current);
-                }
-                resolve();
-                return;
-              }
-            }
-          }
-        } catch (err) {
-          console.error("Error during credential polling:", err);
-          // Don't reject here, just log the error and continue polling
-          // Only reject if we hit the max attempts
-          if (attempts >= maxPollAttempts) {
-            if (pollingIntervalRef.current) {
-              clearInterval(pollingIntervalRef.current);
-            }
-            reject(err);
-          }
-        }
-      }, 2000); // Poll every 2 seconds (reduced from 3 to be more responsive)
-    });
-  };
-
-  const retryStartLab = () => {
-    if (retryCount < maxRetries) {
-      setRetryCount(prev => prev + 1);
-      toast({
-        title: "Retrying",
-        description: "Attempting to start lab again",
-      });
-    } else {
-      toast({
-        title: "Error",
-        description: "Maximum retry attempts reached. Please try again later.",
-        variant: "destructive",
-      });
     }
   };
 
@@ -448,6 +140,7 @@ export default function LabCredentials({ params }: { params: { id: string } }) {
         throw new Error(data.error || "Failed to end lab");
       }
 
+      const data = await response.json();
       setShowLogoutDialog(true);
       
       if (awsConsoleWindow && !awsConsoleWindow.closed) {
@@ -459,7 +152,7 @@ export default function LabCredentials({ params }: { params: { id: string } }) {
             window.close();
             window.opener.postMessage('aws-console-closed', '*');
           `;
-          window.eval.call(awsConsoleWindow, logoutScript);
+          awsConsoleWindow.eval(logoutScript);
         } catch (windowErr) {
           console.log("Could not automatically sign out of AWS console", windowErr);
         }
@@ -480,7 +173,7 @@ export default function LabCredentials({ params }: { params: { id: string } }) {
       title: "Success",
       description: "Lab session ended successfully",
     });
-    router.push(`/dashboard/labs/${params.id}`);
+    router.push(`User/dashboard/labs/${params.id}`);
   };
 
   const copyToClipboard = (text: string, label: string) => {
@@ -495,61 +188,13 @@ export default function LabCredentials({ params }: { params: { id: string } }) {
     if (credentials?.consoleUrl) {
       const newWindow = window.open(credentials.consoleUrl, "_blank");
       setAwsConsoleWindow(newWindow);
-    } else {
-      toast({
-        title: "Error",
-        description: "Console URL is not available",
-        variant: "destructive",
-      });
     }
   };
-
-  const copyAllCredentials = () => {
-    if (!credentials) return;
-
-    const credentialText = 
-`AWS Account Information:
-Account ID: ${credentials.accountId}
-Region: ${credentials.region}
-
-Console Access:
-Username: ${credentials.username}
-Password: ${credentials.password}
-
-Programmatic Access:
-Access Key ID: ${credentials.accessKeyId}
-Secret Access Key: ${credentials.secretAccessKey}
-${credentials.sessionToken ? `Session Token: ${credentials.sessionToken}` : ''}
-
-${credentials.s3BucketName ? `Resources:\nS3 Bucket: ${credentials.s3BucketName}` : ''}`;
-
-    navigator.clipboard.writeText(credentialText);
-    toast({
-      title: "Copied!",
-      description: "All credentials copied to clipboard",
-    });
-  };
-
-  // Check if we're still waiting but have a sessionId - show special message
-  if (loading && sessionId) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
-          <p className="text-muted-foreground">Resources created! Fetching credentials...</p>
-          <p className="text-xs text-muted-foreground mt-2">This may take up to a minute</p>
-        </div>
-      </div>
-    );
-  }
 
   if (loading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
-          <p className="text-muted-foreground">Starting lab environment...</p>
-        </div>
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
       </div>
     );
   }
@@ -558,86 +203,16 @@ ${credentials.s3BucketName ? `Resources:\nS3 Bucket: ${credentials.s3BucketName}
     return (
       <div className="min-h-screen bg-background p-8">
         <Card className="max-w-2xl mx-auto p-6">
-          <h1 className="text-2xl font-bold text-red-600 mb-4">Error Starting Lab</h1>
+          <h1 className="text-2xl font-bold text-red-600 mb-4">Error</h1>
           <p className="text-muted-foreground mb-6">{error}</p>
-          <div className="flex gap-4">
-            <Button onClick={retryStartLab} className="flex items-center gap-2">
-              <RefreshCw className="h-4 w-4" />
-              Retry
-            </Button>
-            <Button variant="outline" onClick={() => router.back()}>Go Back</Button>
-          </div>
-        </Card>
-      </div>
-    );
-  }
-
-  // Show message when we have sessionId but no credentials yet
-  if (sessionId && !credentials) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <Card className="max-w-2xl mx-auto p-6">
-          <h1 className="text-xl font-bold mb-4">Lab Resources Created</h1>
-          <p className="text-muted-foreground mb-6">
-            Your lab resources have been created, but we&apos;re still waiting for all credentials.
-            This should only take a moment...
-          </p>
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
-          <div className="text-xs text-muted-foreground mb-4 text-center">
-            Session ID: <code className="bg-muted-foreground/20 p-1 rounded">{sessionId.substring(0, 8)}...</code>
-          </div>
-          <Button 
-            variant="outline" 
-            onClick={() => {
-              window.location.reload();
-            }}
-            className="w-full mt-4"
-          >
-            Refresh
-          </Button>
-          <Button 
-            variant="ghost" 
-            onClick={async () => {
-              toast({
-                title: "Checking...",
-                description: "Trying to find your lab resources directly",
-              });
-              const success = await checkBucketDirectly();
-              if (!success) {
-                toast({
-                  title: "Not found yet",
-                  description: "Your lab resources might still be provisioning. Please wait.",
-                  variant: "destructive",
-                });
-              }
-            }}
-            className="w-full mt-2"
-          >
-            Check Resources Directly
-          </Button>
+          <Button onClick={() => router.back()}>Go Back</Button>
         </Card>
       </div>
     );
   }
 
   if (!credentials) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <Card className="max-w-2xl mx-auto p-6">
-          <h1 className="text-xl font-bold text-orange-600 mb-4">Missing Credentials</h1>
-          <p className="text-muted-foreground mb-6">
-            We couldn&apos;t retrieve your lab credentials. This might be a temporary issue.
-          </p>
-          <div className="flex gap-4">
-            <Button onClick={retryStartLab} className="flex items-center gap-2">
-              <RefreshCw className="h-4 w-4" />
-              Retry
-            </Button>
-            <Button variant="outline" onClick={() => router.back()}>Go Back</Button>
-          </div>
-        </Card>
-      </div>
-    );
+    return null;
   }
 
   return (
@@ -724,7 +299,7 @@ ${credentials.s3BucketName ? `Resources:\nS3 Bucket: ${credentials.s3BucketName}
             </div>
           </div>
 
-          {/* Access Keys */}
+          {/* Access Keys - Display only, no copy functionality */}
           <Accordion type="single" collapsible className="w-full">
             <AccordionItem value="access-keys">
               <AccordionTrigger className="text-lg font-semibold">
@@ -736,28 +311,12 @@ ${credentials.s3BucketName ? `Resources:\nS3 Bucket: ${credentials.s3BucketName}
                     <p className="text-sm text-muted-foreground">Access Key ID</p>
                     <div className="flex items-center gap-2 mt-1">
                       <code className="font-mono text-sm">{credentials.accessKeyId}</code>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-6 w-6"
-                        onClick={() => copyToClipboard(credentials.accessKeyId, "Access Key ID")}
-                      >
-                        <Copy className="h-4 w-4" />
-                      </Button>
                     </div>
                   </div>
                   <div>
                     <p className="text-sm text-muted-foreground">Secret Access Key</p>
                     <div className="flex items-center gap-2 mt-1">
                       <code className="font-mono text-sm">{credentials.secretAccessKey}</code>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-6 w-6"
-                        onClick={() => copyToClipboard(credentials.secretAccessKey, "Secret Access Key")}
-                      >
-                        <Copy className="h-4 w-4" />
-                      </Button>
                     </div>
                   </div>
                 </div>
@@ -765,7 +324,7 @@ ${credentials.s3BucketName ? `Resources:\nS3 Bucket: ${credentials.s3BucketName}
             </AccordionItem>
           </Accordion>
 
-          {/* Resources */}
+          {/* Resources - Display only, no copy functionality */}
           <div className="space-y-4">
             <h2 className="text-lg font-semibold">Provisioned Resources</h2>
             <div className="bg-muted p-4 rounded-lg">
@@ -774,41 +333,53 @@ ${credentials.s3BucketName ? `Resources:\nS3 Bucket: ${credentials.s3BucketName}
                 <p className="text-sm text-muted-foreground">S3 Bucket</p>
               </div>
               <div className="flex items-center gap-2 mt-1">
-                <code className="font-mono text-sm">{credentials.s3BucketName || 'No bucket provisioned'}</code>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-6 w-6"
-                  onClick={() => credentials.s3BucketName && copyToClipboard(credentials.s3BucketName, "S3 Bucket Name")}
-                >
-                  <Copy className="h-4 w-4" />
-                </Button>
+                <code className="font-mono text-sm">{credentials.s3BucketName}</code>
               </div>
             </div>
           </div>
 
-          {/* Copy All Button */}
-          <Button 
-            onClick={copyAllCredentials}
-            className="w-full mt-4 flex items-center justify-center gap-2"
-          >
-            <Copy className="h-4 w-4" />
-            Copy All Credentials
-          </Button>
+          <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-900/30 rounded-lg p-4">
+            <h3 className="font-medium text-yellow-800 dark:text-yellow-200 mb-2">Important Notes:</h3>
+            <ul className="list-disc pl-4 space-y-1 text-sm text-yellow-700 dark:text-yellow-300">
+              <li>These credentials will expire after 1 hour</li>
+              <li>Do not share these credentials with anyone</li>
+              <li>Save your work before the session expires</li>
+              <li>Resources will be automatically cleaned up when you end the lab</li>
+              <li>Make sure to sign out of the AWS Console when you're done</li>
+            </ul>
+          </div>
         </div>
       </Card>
 
-      {/* End Lab Dialog */}
+      {/* Logout Dialog */}
       <Dialog open={showLogoutDialog} onOpenChange={setShowLogoutDialog}>
-        <DialogContent>
+        <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Lab Environment Ended</DialogTitle>
+            <DialogTitle>Sign out of AWS Console</DialogTitle>
             <DialogDescription>
-              Your lab environment has been successfully terminated. All provisioned resources have been cleaned up.
+              Your lab has been ended. Please make sure to sign out of the AWS Console.
             </DialogDescription>
           </DialogHeader>
-          <DialogFooter>
-            <Button onClick={completeLabEnd}>Return to Lab</Button>
+          <div className="bg-muted p-4 rounded-lg my-4">
+            <h3 className="font-medium mb-2">To sign out from AWS Console:</h3>
+            <ol className="list-decimal pl-5 space-y-1 text-sm">
+              <li>Go to your AWS Console window</li>
+              <li>Click on your username in the top right corner</li>
+              <li>Select "Sign Out"</li>
+              <li>Close the AWS Console window</li>
+            </ol>
+            <div className="mt-3 flex items-center justify-center">
+              <LogOut className="h-6 w-6 text-red-500" />
+            </div>
+          </div>
+          <DialogFooter className="sm:justify-center">
+            <Button 
+              type="button" 
+              onClick={completeLabEnd}
+              className="bg-blue-600 hover:bg-blue-700 text-white"
+            >
+              I have signed out
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
