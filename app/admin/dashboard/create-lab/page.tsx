@@ -1,18 +1,20 @@
 "use client"
+
 import { useSession } from "next-auth/react"
 import { useRouter } from "next/navigation"
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Textarea } from "@/components/ui/textarea"
+import { TinyMCEEditor } from "@/components/ui/tinymce-editor"
+import { CombinedLabEditor } from "@/components/ui/combined-lab-editor"
+import { CoveredTopicsInput } from "@/components/ui/covered-topics-input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
 import { ArrowLeft, Upload, ImageIcon } from 'lucide-react'
 import { motion } from "framer-motion"
 import { toast } from "sonner"
-import Image from "next/image";
-
+import Image from "next/image"
 
 const fadeIn = {
   initial: { opacity: 0, y: 20 },
@@ -38,7 +40,10 @@ export default function CreateLab() {
   const [beforeImagePreview, setBeforeImagePreview] = useState<string | null>(null)
   const [afterImagePreview, setAfterImagePreview] = useState<string | null>(null)
   const [difficulty, setDifficulty] = useState("BEGINNER")
-  const totalSections = 4
+  const totalSections = 3
+  const [steps, setSteps] = useState<{ title: string; content: string }[]>([
+    { title: 'Step 1', content: '' }
+  ])
 
   const [formData, setFormData] = useState({
     title: "",
@@ -56,13 +61,15 @@ export default function CreateLab() {
   const validateCurrentSection = () => {
     switch (currentSection) {
       case 0:
-        return formData.title.trim() !== "" && formData.duration.trim() !== "" && formData.description.trim() !== ""
+        return formData.title.trim() !== "" && formData.duration.trim() !== ""
       case 1:
-        return formData.audience.trim() !== "" && formData.prerequisites.trim() !== ""
+        return (
+          formData.description.trim() !== "" &&
+          formData.audience.trim() !== "" &&
+          formData.prerequisites.trim() !== ""
+        )
       case 2:
         return formData.coveredTopics.trim() !== ""
-      case 3:
-        return formData.steps.trim() !== ""
       default:
         return false
     }
@@ -76,8 +83,15 @@ export default function CreateLab() {
     }
   }
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target
+    setFormData((prev) => ({
+      ...prev,
+      [name]: value,
+    }))
+  }
+
+  const handleEditorChange = (name: string, value: string) => {
     setFormData((prev) => ({
       ...prev,
       [name]: value,
@@ -122,6 +136,31 @@ export default function CreateLab() {
     }))
   }
 
+  const addStep = () => {
+    setSteps([...steps, { title: `Step ${steps.length + 1}`, content: '' }])
+  }
+
+  const removeStep = (index: number) => {
+    const newSteps = steps.filter((_, i) => i !== index)
+    const renamedSteps = newSteps.map((step, idx) => ({
+      ...step,
+      title: `Step ${idx + 1}`
+    }))
+    setSteps(renamedSteps)
+  }
+
+  const updateStepTitle = (index: number, title: string) => {
+    const newSteps = [...steps]
+    newSteps[index].title = title
+    setSteps(newSteps)
+  }
+
+  const updateStepContent = (index: number, content: string) => {
+    const newSteps = [...steps]
+    newSteps[index].content = content
+    setSteps(newSteps)
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
@@ -134,7 +173,7 @@ export default function CreateLab() {
     }
 
     const emptyFields = Object.entries(requiredFields)
-      .filter(([value]) => !value)
+      .filter(([_, value]) => !value)
       .map(([key]) => key)
 
     if (emptyFields.length > 0) {
@@ -147,6 +186,7 @@ export default function CreateLab() {
     try {
       const formDataObj = new FormData()
 
+      // Add basic form data
       formDataObj.set("title", formData.title)
       formDataObj.set("duration", formData.duration)
       formDataObj.set("description", formData.description)
@@ -155,23 +195,32 @@ export default function CreateLab() {
       formDataObj.set("difficulty", difficulty)
       formDataObj.set("authorId", (session?.user as { id: string }).id || "")
 
+      // Handle file uploads
       if (selectedBeforeFile) {
         formDataObj.set("environmentImageBefore", selectedBeforeFile)
       }
-
       if (selectedAfterFile) {
         formDataObj.set("environmentImageAfter", selectedAfterFile)
       }
 
+      // Process objectives and topics
       const objectives = formData.objectives.split("\n").filter(Boolean)
       const coveredTopics = formData.coveredTopics.split("\n").filter(Boolean)
       const environmentUrls = formData.environment.split("\n").filter(Boolean)
-      const steps = formData.steps.split("\n").filter(Boolean)
 
       formDataObj.set("objectives", JSON.stringify(objectives))
       formDataObj.set("coveredTopics", JSON.stringify(coveredTopics))
       formDataObj.set("environment", JSON.stringify({ images: environmentUrls }))
-      formDataObj.set("steps", JSON.stringify({ setup: steps }))
+
+      // Format steps data
+      const formattedSteps = steps.map(step => ({
+        title: step.title.trim(),
+        content: step.content.trim()
+      }))
+
+      formDataObj.set("steps", JSON.stringify({
+        setup: formattedSteps
+      }))
 
       const response = await fetch("/api/labs", {
         method: "POST",
@@ -185,15 +234,17 @@ export default function CreateLab() {
 
       toast.success("Lab created successfully!")
       router.push("/admin/dashboard")
-    }  catch (error: unknown) {
+    } catch (error: unknown) {
       if (error instanceof Error) {
-        console.error('Detailed error:', error.message);
-        console.error('Error stack:', error.stack);
-        toast.error(error.message || "Failed to create lab. Please try again.");
+        console.error('Detailed error:', error.message)
+        console.error('Error stack:', error.stack)
+        toast.error(error.message || "Failed to create lab. Please try again.")
       } else {
-        console.error('An unknown error occurred:', error);
-        toast.error("An unexpected error occurred.");
+        console.error('An unknown error occurred:', error)
+        toast.error("An unexpected error occurred.")
       }
+    } finally {
+      setIsSubmitting(false)
     }
   }
 
@@ -242,48 +293,22 @@ export default function CreateLab() {
                 />
               </div>
             </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="description">Description</Label>
-              <Textarea
-                id="description"
-                name="description"
-                required
-                value={formData.description}
-                onChange={handleInputChange}
-              />
-            </div>
           </motion.div>
         )
       case 1:
         return (
           <motion.div {...fadeIn} className="space-y-6">
-            <div className="space-y-2">
-              <Label htmlFor="objectives">Objectives (one per line)</Label>
-              <Textarea
-                id="objectives"
-                name="objectives"
-                required
-                value={formData.objectives}
-                onChange={handleInputChange}
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="audience">Target Audience</Label>
-              <Textarea id="audience" name="audience" required value={formData.audience} onChange={handleInputChange} />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="prerequisites">Prerequisites</Label>
-              <Textarea
-                id="prerequisites"
-                name="prerequisites"
-                required
-                value={formData.prerequisites}
-                onChange={handleInputChange}
-              />
-            </div>
+            <CombinedLabEditor
+              description={formData.description}
+              objectives={formData.objectives}
+              audience={formData.audience}
+              prerequisites={formData.prerequisites}
+              onDescriptionChange={(value) => handleEditorChange("description", value)}
+              onObjectivesChange={(value) => handleEditorChange("objectives", value)}
+              onAudienceChange={(value) => handleEditorChange("audience", value)}
+              onPrerequisitesChange={(value) => handleEditorChange("prerequisites", value)}
+              height={400}
+            />
           </motion.div>
         )
       case 2:
@@ -368,7 +393,7 @@ export default function CreateLab() {
 
             <div className="space-y-2">
               <Label htmlFor="environment">Additional Environment URLs (one per line)</Label>
-              <Textarea
+              <Input
                 id="environment"
                 name="environment"
                 placeholder="Enter additional image URLs, one per line"
@@ -377,31 +402,58 @@ export default function CreateLab() {
               />
             </div>
 
+            <CoveredTopicsInput
+              value={formData.coveredTopics}
+              onChange={(value) => handleEditorChange("coveredTopics", value)}
+              required={true}
+            />
+
             <div className="space-y-2">
-              <Label htmlFor="coveredTopics">Covered Topics (one per line)</Label>
-              <Textarea
-                id="coveredTopics"
-                name="coveredTopics"
-                required
-                value={formData.coveredTopics}
-                onChange={handleInputChange}
-              />
-            </div>
-          </motion.div>
-        )
-      case 3:
-        return (
-          <motion.div {...fadeIn} className="space-y-6">
-            <div className="space-y-2">
-              <Label htmlFor="steps">Steps (one per line)</Label>
-              <Textarea
-                id="steps"
-                name="steps"
-                required
-                className="min-h-[200px]"
-                value={formData.steps}
-                onChange={handleInputChange}
-              />
+              <Label htmlFor="steps">Lab Steps</Label>
+              <div className="space-y-6">
+                {steps.map((step, index) => (
+                  <div key={index} className="border border-border rounded-lg p-4 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex-1 mr-4">
+                        <Input
+                          value={step.title}
+                          onChange={(e) => updateStepTitle(index, e.target.value)}
+                          placeholder={`Step ${index + 1}`}
+                          className="font-semibold"
+                        />
+                      </div>
+                      {steps.length > 1 && (
+                        <Button 
+                          variant="ghost" 
+                          size="sm"
+                          onClick={() => removeStep(index)}
+                          className="h-8 text-destructive hover:text-destructive/80"
+                        >
+                          Remove
+                        </Button>
+                      )}
+                    </div>
+                    
+                    <TinyMCEEditor
+                      id={`step-content-${index}`}
+                      name={`step-content-${index}`}
+                      value={step.content}
+                      onChange={(content) => updateStepContent(index, content)}
+                      height={200}
+                      placeholder="Enter step instructions here..."
+                    />
+                  </div>
+                ))}
+                
+                <Button 
+                  type="button" 
+                  variant="outline" 
+                  onClick={addStep}
+                  className="w-full"
+                >
+                  Add Step
+                </Button>
+              </div>
             </div>
           </motion.div>
         )

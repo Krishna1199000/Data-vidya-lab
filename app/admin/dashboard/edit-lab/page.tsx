@@ -7,6 +7,7 @@ import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
+import { TinyMCEEditor } from "@/components/ui/tinymce-editor"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
@@ -127,6 +128,13 @@ export default function EditLab({ params }: { params: Promise<{ id: string }> })
     }))
   }
 
+  const handleEditorChange = (name: string, value: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      [name]: value,
+    }))
+  }
+
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>, type: 'before' | 'after') => {
     const file = event.target.files?.[0]
     if (file) {
@@ -177,7 +185,7 @@ export default function EditLab({ params }: { params: Promise<{ id: string }> })
     }
 
     const emptyFields = Object.entries(requiredFields)
-      .filter(([ value]) => !value)
+      .filter(([_, value]) => !value)
       .map(([key]) => key)
 
     if (emptyFields.length > 0) {
@@ -285,13 +293,14 @@ export default function EditLab({ params }: { params: Promise<{ id: string }> })
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="description">Description</Label>
-              <Textarea
+              <TinyMCEEditor
                 id="description"
                 name="description"
+                label="Description"
                 required
                 value={formData.description}
-                onChange={handleInputChange}
+                onChange={(value) => handleEditorChange("description", value)}
+                height={250}
               />
             </div>
           </motion.div>
@@ -311,24 +320,26 @@ export default function EditLab({ params }: { params: Promise<{ id: string }> })
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="audience">Target Audience</Label>
-              <Textarea
+              <TinyMCEEditor
                 id="audience"
                 name="audience"
+                label="Target Audience"
                 required
                 value={formData.audience}
-                onChange={handleInputChange}
+                onChange={(value) => handleEditorChange("audience", value)}
+                height={200}
               />
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="prerequisites">Prerequisites</Label>
-              <Textarea
+              <TinyMCEEditor
                 id="prerequisites"
                 name="prerequisites"
+                label="Prerequisites"
                 required
                 value={formData.prerequisites}
-                onChange={handleInputChange}
+                onChange={(value) => handleEditorChange("prerequisites", value)}
+                height={200}
               />
             </div>
           </motion.div>
@@ -440,15 +451,13 @@ export default function EditLab({ params }: { params: Promise<{ id: string }> })
         return (
           <motion.div {...fadeIn} className="space-y-6">
             <div className="space-y-2">
-              <Label htmlFor="steps">Steps (one per line)</Label>
-              <Textarea
-                id="steps"
-                name="steps"
-                required
-                className="min-h-[200px]"
-                value={formData.steps}
-                onChange={handleInputChange}
-              />
+              <Label htmlFor="steps">Lab Steps</Label>
+              <div className="border border-border rounded-lg p-4 bg-card">
+                <LabSteps
+                  value={formData.steps}
+                  onChange={(value) => handleEditorChange("steps", value)}
+                />
+              </div>
             </div>
           </motion.div>
         )
@@ -539,5 +548,119 @@ export default function EditLab({ params }: { params: Promise<{ id: string }> })
         </motion.div>
       </div>
     </motion.div>
+  )
+}
+
+interface LabStepsProps {
+  value: string
+  onChange: (value: string) => void
+}
+
+const LabSteps = ({ value, onChange }: LabStepsProps) => {
+  const [steps, setSteps] = useState<{ title: string; content: string }[]>([
+    { title: 'Step 1', content: '' }
+  ])
+
+  // Initialize from value when component mounts
+  useEffect(() => {
+    if (value) {
+      try {
+        const lines = value.split('\n').filter(Boolean)
+        const parsedSteps = []
+        
+        for (let i = 0; i < lines.length; i++) {
+          if (lines[i].startsWith('Step ')) {
+            parsedSteps.push({
+              title: lines[i],
+              content: ''
+            })
+          } else if (parsedSteps.length > 0) {
+            const lastIndex = parsedSteps.length - 1
+            parsedSteps[lastIndex].content += (parsedSteps[lastIndex].content ? '\n' : '') + lines[i]
+          }
+        }
+        
+        if (parsedSteps.length > 0) {
+          setSteps(parsedSteps)
+        }
+      } catch (e) {
+        console.error('Error parsing steps:', e)
+      }
+    }
+  }, [value])
+
+  const addStep = () => {
+    setSteps([...steps, { title: `Step ${steps.length + 1}`, content: '' }])
+    updateParentValue([...steps, { title: `Step ${steps.length + 1}`, content: '' }])
+  }
+
+  const removeStep = (index: number) => {
+    const newSteps = [...steps]
+    newSteps.splice(index, 1)
+    
+    // Rename steps to maintain sequential order
+    const renamedSteps = newSteps.map((step, idx) => ({
+      ...step,
+      title: `Step ${idx + 1}`
+    }))
+    
+    setSteps(renamedSteps)
+    updateParentValue(renamedSteps)
+  }
+
+  const updateStepContent = (index: number, content: string) => {
+    const newSteps = [...steps]
+    newSteps[index].content = content
+    setSteps(newSteps)
+    updateParentValue(newSteps)
+  }
+
+  const updateParentValue = (stepsArray: { title: string; content: string }[]) => {
+    // Format steps as needed for the parent component
+    const formattedValue = stepsArray.map(step => 
+      `${step.title}\n${step.content}`
+    ).join('\n\n')
+    
+    onChange(formattedValue)
+  }
+
+  return (
+    <div className="space-y-6">
+      {steps.map((step, index) => (
+        <div key={index} className="border border-border rounded-lg p-4 space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-lg font-semibold">{step.title}</h3>
+            {steps.length > 1 && (
+              <Button 
+                variant="ghost" 
+                size="sm"
+                onClick={() => removeStep(index)}
+                className="h-8 text-destructive hover:text-destructive/80"
+              >
+                Remove
+              </Button>
+            )}
+          </div>
+          
+          <TinyMCEEditor
+            id={`step-content-${index}`}
+            name={`step-content-${index}`}
+            value={step.content}
+            onChange={(content) => updateStepContent(index, content)}
+            height={200}
+            placeholder="Enter step instructions here..."
+          />
+        </div>
+      ))}
+      
+      <Button 
+        type="button" 
+        variant="outline" 
+        onClick={addStep}
+        className="w-full"
+      >
+        Add Step
+      </Button>
+    </div>
   )
 }

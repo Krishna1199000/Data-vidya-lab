@@ -147,7 +147,6 @@ const LabPage: React.FC<LabPageProps> = ({ params }) => {
   }
 
   const fetchLab = async () => {
-    console.log("Fetching lab data...")
     try {
       const response = await fetch(`/api/labs/${resolvedParams.id}`, {
         method: "GET",
@@ -159,20 +158,19 @@ const LabPage: React.FC<LabPageProps> = ({ params }) => {
 
       if (!response.ok) throw new Error("Failed to fetch lab")
       const data = await response.json()
-      console.log("Fetched lab data:", data)
 
       // Extract steps from the nested structure
       let parsedSteps = []
-      if (data.steps && data.steps.setup && Array.isArray(data.steps.setup)) {
-        parsedSteps = data.steps.setup.map((step: string) => ({
-          title: step,
-          isLocked: false,
+      if (data.steps?.setup && Array.isArray(data.steps.setup)) {
+        parsedSteps = data.steps.setup.map((step: { title: string; content: string }) => ({
+          title: step.title,
+          isLocked: false
         }))
       }
 
       setLab({
         ...data,
-        steps: parsedSteps,
+        steps: parsedSteps
       })
     } catch (error) {
       console.error("Error fetching lab:", error)
@@ -181,7 +179,7 @@ const LabPage: React.FC<LabPageProps> = ({ params }) => {
       setLoading(false)
     }
   }
-
+  
   if (status === "unauthenticated") {
     router.push("/User/signin")
     return null
