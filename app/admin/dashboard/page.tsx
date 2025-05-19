@@ -289,7 +289,7 @@ export default function Dashboard() {
                             </CardDescription>
                           </CardHeader>
                           <CardContent>
-                            <p className="text-muted-foreground line-clamp-2">{lab.description}</p>
+                            <div className="text-muted-foreground line-clamp-2" dangerouslySetInnerHTML={{ __html: lab.description }} />
                           </CardContent>
                           <CardFooter>
                             <motion.div
@@ -357,7 +357,7 @@ export default function Dashboard() {
                         </CardDescription>
                       </CardHeader>
                       <CardContent>
-                        <p className="text-muted-foreground line-clamp-2">{lab.description}</p>
+                        <div className="text-muted-foreground line-clamp-2" dangerouslySetInnerHTML={{ __html: lab.description }} />
                       </CardContent>
                       <CardFooter>
                         <motion.div

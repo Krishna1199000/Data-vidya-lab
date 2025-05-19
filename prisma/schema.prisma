@@ -47,13 +47,13 @@ model Lab {
   title         String
   difficulty    Difficulty @default(BEGINNER)
   duration      Int
-  description   String 
-  objectives    String[]
-  audience      String    @db.Text
-  prerequisites String    @db.Text
+  description   String?   @db.Text
+  objectives    String[]  @default([])
+  audience      String?   @db.Text
+  prerequisites String?   @db.Text
   environmentImageBefore String?
   environmentImageAfter  String?
-  coveredTopics String[]
+  coveredTopics String[]  @default([])
   steps         Json
   published     Boolean   @default(false)
   author        User      @relation(fields: [authorId], references: [id])
@@ -61,6 +61,7 @@ model Lab {
   sessions      LabSession[]
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
+  services      String[]  @default([])
 
   @@index([authorId])
 }
@@ -112,6 +113,7 @@ enum Difficulty {
   INTERMEDIATE
   ADVANCED
 }
+
 model LabSession {
   id                    String   @id @default(uuid())
   lab                   Lab      @relation(fields: [labId], references: [id])

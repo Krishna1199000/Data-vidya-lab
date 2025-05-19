@@ -30,6 +30,10 @@ const stagger = {
   },
 }
 
+const AWS_SERVICES = [
+  "EC2", "S3", "Lambda", "RDS", "DynamoDB", "SQS", "SNS", "CloudWatch", "IAM", "VPC", "ECS", "EKS", "CloudFormation", "Route 53", "Elastic Beanstalk", "API Gateway", "CloudFront", "Kinesis", "Redshift", "ElastiCache", "Athena", "Glue", "Step Functions", "Secrets Manager", "Certificate Manager", "WAF", "AppSync", "Cognito", "SageMaker", "Elastic Transcoder", "Direct Connect", "Inspector"
+];
+
 export default function CreateLab() {
   const { data: session } = useSession()
   const router = useRouter()
@@ -56,6 +60,7 @@ export default function CreateLab() {
     coveredTopics: "",
     environment: "",
     steps: "",
+    services: [] as string[],
   })
 
   const validateCurrentSection = () => {
@@ -161,6 +166,13 @@ export default function CreateLab() {
     setSteps(newSteps)
   }
 
+  const handleServicesChange = (selected: string[]) => {
+    setFormData((prev) => ({
+      ...prev,
+      services: selected,
+    }))
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
@@ -211,6 +223,7 @@ export default function CreateLab() {
       formDataObj.set("objectives", JSON.stringify(objectives))
       formDataObj.set("coveredTopics", JSON.stringify(coveredTopics))
       formDataObj.set("environment", JSON.stringify({ images: environmentUrls }))
+      formDataObj.set("services", JSON.stringify(formData.services))
 
       // Format steps data
       const formattedSteps = steps.map(step => ({
@@ -309,6 +322,28 @@ export default function CreateLab() {
               onPrerequisitesChange={(value) => handleEditorChange("prerequisites", value)}
               height={400}
             />
+            <div>
+              <Label htmlFor="services">AWS Services</Label>
+              <div className="flex flex-wrap gap-2 mt-2">
+                {AWS_SERVICES.map((service) => (
+                  <label key={service} className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      value={service}
+                      checked={formData.services.includes(service)}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          handleServicesChange([...formData.services, service])
+                        } else {
+                          handleServicesChange(formData.services.filter((s) => s !== service))
+                        }
+                      }}
+                    />
+                    <span>{service}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
           </motion.div>
         )
       case 2:

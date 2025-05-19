@@ -17,11 +17,11 @@ interface Lab {
   title: string;
   difficulty: "BEGINNER" | "INTERMEDIATE" | "ADVANCED";
   duration: number;
-  description: string;
-  objectives: { title: string; description: string }[];
-  audience: string;
-  prerequisites: string;
-  coveredTopics: { topic: string; details: string }[];
+  description: string | null;
+  objectives: string[];
+  audience: string | null;
+  prerequisites: string | null;
+  coveredTopics: string[];
   steps: Record<string, { [key: string]: string | number | boolean | object }>;
   authorId: string;
   published: boolean;
@@ -31,6 +31,7 @@ interface Lab {
   updatedAt: Date;
   author: Author;
   isOwner?: boolean;
+  services: string[];
 }
 
 // Type for the database response
@@ -39,11 +40,11 @@ type DbLabResponse = {
   title: string;
   difficulty: "BEGINNER" | "INTERMEDIATE" | "ADVANCED";
   duration: number;
-  description: string;
+  description: string | null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   objectives: string | any[];
-  audience: string;
-  prerequisites: string;
+  audience: string | null;
+  prerequisites: string | null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   coveredTopics: string | any[];
   steps: string | Record<string, { [key: string]: string | number | boolean | object }> | null;
@@ -58,6 +59,7 @@ type DbLabResponse = {
     name: string | null;
     email: string | null;
   };
+  services: string[];
 }
 
 const s3Client = new S3Client({
@@ -144,13 +146,10 @@ export async function POST(req: NextRequest) {
 
     const formData = await req.formData()
 
-    // Validate required fields
+    // Validate required fields - only title and duration are required
     const requiredFields = [
       "title",
       "duration",
-      "description",
-      "audience",
-      "prerequisites",
     ]
     
     const missingFields = requiredFields.filter((field) => {
@@ -194,15 +193,18 @@ export async function POST(req: NextRequest) {
     let objectives = []
     let coveredTopics = []
     let steps: Record<string, { [key: string]: string | number | boolean | object }> = {}   
+    let services: string[] = []
 
     try {
       const objectivesStr = formData.get("objectives")
       const coveredTopicsStr = formData.get("coveredTopics")
       const stepsStr = formData.get("steps")
+      const servicesStr = formData.get("services")
 
       objectives = objectivesStr ? JSON.parse(objectivesStr as string) : []
       coveredTopics = coveredTopicsStr ? JSON.parse(coveredTopicsStr as string) : []
       steps = stepsStr ? JSON.parse(stepsStr as string) : {}
+      services = servicesStr ? JSON.parse(servicesStr as string) : []
     } catch (error: unknown) {
       console.error(error); 
   
@@ -231,16 +233,17 @@ export async function POST(req: NextRequest) {
           | "INTERMEDIATE"
           | "ADVANCED",
         duration,
-        description: formData.get("description") as string,
+        description: (formData.get("description") as string) || null,
         objectives,
-        audience: formData.get("audience") as string,
-        prerequisites: formData.get("prerequisites") as string,
+        audience: (formData.get("audience") as string) || null,
+        prerequisites: (formData.get("prerequisites") as string) || null,
         coveredTopics,
         steps,
         authorId: session.user.id,
         published: false,
         environmentImageBefore: beforeImagePath,
         environmentImageAfter: afterImagePath,
+        services,
       },
     })
 
@@ -302,11 +305,16 @@ export async function GET() {
         ? JSON.parse(lab.steps)
         : lab.steps || {};
 
+      const parsedServices = typeof lab.services === "string"
+        ? JSON.parse(lab.services)
+        : lab.services || [];
+
       return {
         ...lab,
         objectives: parsedObjectives,
         coveredTopics: parsedCoveredTopics,
         steps: parsedSteps as Record<string, { [key: string]: string | number | boolean | object }>,
+        services: parsedServices,
         isOwner: session?.user?.role === "ADMIN" && session?.user?.id === lab.authorId,
       };
     });

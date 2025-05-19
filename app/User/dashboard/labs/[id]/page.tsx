@@ -313,18 +313,22 @@ const LabPage: React.FC<LabPageProps> = ({ params }) => {
                   <div>
                     <h2 className="text-xl font-semibold text-foreground mb-4">Description</h2>
                     <div className="prose prose-gray dark:prose-invert max-w-none">
-                      <p>{lab.description}</p>
+                      <div dangerouslySetInnerHTML={{ __html: lab.description }} />
                     </div>
                   </div>
 
                   <div>
                     <h2 className="text-xl font-semibold text-foreground mb-4">Lab Objectives</h2>
                     <div className="prose prose-gray dark:prose-invert max-w-none">
-                      <ul>
-                        {lab.objectives?.map((objective, index) => (
-                          <li key={index}>{objective}</li>
-                        ))}
-                      </ul>
+                      {Array.isArray(lab.objectives) ? (
+                        <ul>
+                          {lab.objectives.map((objective, index) => (
+                            <li key={index} dangerouslySetInnerHTML={{ __html: objective }} />
+                          ))}
+                        </ul>
+                      ) : (
+                        <div dangerouslySetInnerHTML={{ __html: lab.objectives }} />
+                      )}
                     </div>
                   </div>
 
@@ -335,11 +339,11 @@ const LabPage: React.FC<LabPageProps> = ({ params }) => {
                         {Array.isArray(lab.prerequisites) ? (
                           <ul>
                             {lab.prerequisites.map((prerequisite, index) => (
-                              <li key={index}>{prerequisite}</li>
+                              <li key={index} dangerouslySetInnerHTML={{ __html: prerequisite }} />
                             ))}
                           </ul>
                         ) : (
-                          <p>{lab.prerequisites}</p>
+                          <div dangerouslySetInnerHTML={{ __html: lab.prerequisites }} />
                         )}
                       </div>
                     </div>

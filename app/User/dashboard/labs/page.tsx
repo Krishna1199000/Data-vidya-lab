@@ -214,7 +214,7 @@ export default function LabsPage() {
 
                 <div className="space-y-2">
                   <h2 className="text-lg font-semibold text-gray-900 line-clamp-2">{lab.title}</h2>
-                  <p className="text-sm text-gray-600 line-clamp-2">{lab.description}</p>
+                  <div className="text-sm text-gray-600 line-clamp-2" dangerouslySetInnerHTML={{ __html: lab.description }} />
                 </div>
 
                 <div className="pt-4 flex items-center justify-between border-t border-gray-100">

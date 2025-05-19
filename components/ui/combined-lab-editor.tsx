@@ -30,6 +30,12 @@ export function CombinedLabEditor({
 }: CombinedLabEditorProps) {
   const [activeTab, setActiveTab] = useState("description")
   
+  // Function to strip HTML tags
+  const stripHtmlTags = (html: string): string => {
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    return doc.body.textContent || '';
+  };
+
   // Editor configuration
   const editorConfig = {
     height,
@@ -73,6 +79,16 @@ export function CombinedLabEditor({
     }
   }
 
+  // Handle editor changes with proper HTML cleanup
+  const handleEditorChange = (setter: (value: string) => void) => (content: string) => {
+    // For objectives field, we need to extract clean text content for the JSON array
+    if (setter === onObjectivesChange) {
+      setter(content);
+    } else {
+      setter(content);
+    }
+  };
+
   return (
     <div className="space-y-4">
       <Label>Lab Content</Label>
@@ -93,7 +109,7 @@ export function CombinedLabEditor({
               ...editorConfig,
               placeholder: "Enter lab description...",
             }}
-            onEditorChange={onDescriptionChange}
+            onEditorChange={handleEditorChange(onDescriptionChange)}
           />
         </TabsContent>
         
@@ -104,9 +120,9 @@ export function CombinedLabEditor({
             value={objectives}
             init={{
               ...editorConfig,
-              placeholder: "Enter lab objectives...",
+              placeholder: "Enter lab objectives (one per line)...",
             }}
-            onEditorChange={onObjectivesChange}
+            onEditorChange={handleEditorChange(onObjectivesChange)}
           />
         </TabsContent>
         
@@ -119,7 +135,7 @@ export function CombinedLabEditor({
               ...editorConfig,
               placeholder: "Describe the target audience...",
             }}
-            onEditorChange={onAudienceChange}
+            onEditorChange={handleEditorChange(onAudienceChange)}
           />
         </TabsContent>
         
@@ -132,7 +148,7 @@ export function CombinedLabEditor({
               ...editorConfig,
               placeholder: "List any prerequisites...",
             }}
-            onEditorChange={onPrerequisitesChange}
+            onEditorChange={handleEditorChange(onPrerequisitesChange)}
           />
         </TabsContent>
       </Tabs>
