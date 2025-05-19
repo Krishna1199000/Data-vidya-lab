@@ -130,6 +130,7 @@ model LabSession {
   status                LabSessionStatus @default(ACTIVE)
   startedAt             DateTime @default(now())
   endedAt               DateTime?
+  timerEndsAt           DateTime? // When the lab session should end based on duration
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
 

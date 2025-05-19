@@ -49,6 +49,17 @@ export async function POST(
     const { stdout: password } = await execAsync('terraform output -raw password', { cwd: terraformDir });
     const { stdout: bucketName } = await execAsync('terraform output -raw bucket_name', { cwd: terraformDir });
 
+    // Fetch the lab to get its duration
+    const lab = await prisma.lab.findUnique({
+      where: { id: params.id },
+      select: { duration: true },
+    });
+    if (!lab) {
+      return NextResponse.json({ error: 'Lab not found' }, { status: 404 });
+    }
+    const durationMinutes = lab.duration;
+    const timerEndsAt = new Date(Date.now() + durationMinutes * 60 * 1000);
+
     // Create lab session in database
     const labSession = await prisma.labSession.create({
       data: {
@@ -59,7 +70,7 @@ export async function POST(
         aws_access_key_id: accessKeyId.trim(),
         aws_secret_access_key: secretAccessKey.trim(),
         password: password.trim(),
-        expiresAt: new Date(Date.now() + 3600000), // 1 hour from now
+        timerEndsAt,
         status: 'ACTIVE',
       },
     });
@@ -76,6 +87,8 @@ export async function POST(
         consoleUrl: `https://${accountId}.signin.aws.amazon.com/console`,
         s3BucketName: bucketName.trim(),
       },
+      timerEndsAt: labSession.timerEndsAt,
+      duration: durationMinutes,
     });
   } catch (error) {
     console.error('Error starting lab:', error);

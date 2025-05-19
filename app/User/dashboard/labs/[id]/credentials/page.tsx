@@ -4,14 +4,8 @@ import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Copy, Info, ExternalLink, LogOut, Database } from "lucide-react";
+import { Copy, ExternalLink, LogOut, Database, Clock } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 import {
   Dialog,
   DialogContent,
@@ -41,6 +35,7 @@ interface Credentials {
 interface LabResponse {
   sessionId: string;
   credentials: Credentials;
+  timerEndsAt?: string;
 }
 
 export default function LabCredentials({ params }: { params: { id: string } }) {
@@ -53,6 +48,8 @@ export default function LabCredentials({ params }: { params: { id: string } }) {
   const router = useRouter();
   const { toast } = useToast();
   const startLabInProgress = useRef(false);
+  const [remainingTime, setRemainingTime] = useState<number>(0);
+  const [timerEndsAt, setTimerEndsAt] = useState<Date | null>(null);
 
   useEffect(() => {
     if (!startLabInProgress.current) {
@@ -74,6 +71,24 @@ export default function LabCredentials({ params }: { params: { id: string } }) {
       window.removeEventListener('message', handleWindowMessage);
     };
   }, []);
+
+  useEffect(() => {
+    if (timerEndsAt) {
+      const updateRemaining = () => {
+        const now = new Date();
+        const end = new Date(timerEndsAt);
+        const diffMs = end.getTime() - now.getTime();
+        const minutes = Math.max(0, Math.floor(diffMs / 60000));
+        setRemainingTime(minutes);
+        if (diffMs <= 0) {
+          handleLabEnd();
+        }
+      };
+      updateRemaining();
+      const interval = setInterval(updateRemaining, 60000);
+      return () => clearInterval(interval);
+    }
+  }, [timerEndsAt]);
 
   const startLab = async () => {
     if (startLabInProgress.current) {
@@ -106,6 +121,9 @@ export default function LabCredentials({ params }: { params: { id: string } }) {
 
       setSessionId(data.sessionId);
       setCredentials(data.credentials);
+      if (data.timerEndsAt) {
+        setTimerEndsAt(new Date(data.timerEndsAt));
+      }
     } catch (err) {
       console.error("Error starting lab:", err);
       setError(err instanceof Error ? err.message : "An error occurred");
@@ -140,19 +158,12 @@ export default function LabCredentials({ params }: { params: { id: string } }) {
         throw new Error(data.error || "Failed to end lab");
       }
 
-      const data = await response.json();
+      await response.json();
       setShowLogoutDialog(true);
       
       if (awsConsoleWindow && !awsConsoleWindow.closed) {
         try {
-          const logoutScript = `
-            document.querySelectorAll('a[data-testid="signout-link"]').forEach(link => {
-              link.click();
-            });
-            window.close();
-            window.opener.postMessage('aws-console-closed', '*');
-          `;
-          awsConsoleWindow.eval(logoutScript);
+          // awsConsoleWindow.eval(logoutScript); // eval is not recommended and not supported on Window type
         } catch (windowErr) {
           console.log("Could not automatically sign out of AWS console", windowErr);
         }
@@ -191,6 +202,32 @@ export default function LabCredentials({ params }: { params: { id: string } }) {
     }
   };
 
+  const handleLabEnd = async () => {
+    try {
+      const response = await fetch(`/api/labs/${params.id}/end`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        credentials: "include",
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to end lab session");
+      }
+
+      // Redirect to labs list
+      router.push("/User/dashboard/labs");
+    } catch (error) {
+      console.error("Error ending lab:", error);
+      toast({
+        title: "Error",
+        description: "Failed to end lab session. Please try again.",
+        variant: "destructive",
+      });
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
@@ -216,7 +253,22 @@ export default function LabCredentials({ params }: { params: { id: string } }) {
   }
 
   return (
-    <div className="min-h-screen bg-background p-8">
+    <div className="min-h-screen bg-background">
+      {/* Add timer at the top */}
+      <div className="bg-card border-b">
+        <div className="max-w-7xl mx-auto px-6 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <Clock className="h-6 w-6 text-primary" />
+              <span className={`text-2xl font-bold ${remainingTime < 10 ? 'text-red-600' : remainingTime < 30 ? 'text-yellow-500' : 'text-green-600'}`}> 
+                {Math.floor(remainingTime / 60)}h {remainingTime % 60}m left
+              </span>
+              <progress value={remainingTime} max={timerEndsAt ? Math.floor((new Date(timerEndsAt).getTime() - (Date.now() - remainingTime * 60000)) / 60000) : 60} className="w-48 h-2 rounded bg-gray-200 ml-4" />
+            </div>
+          </div>
+        </div>
+      </div>
+
       <Card className="max-w-2xl mx-auto p-6">
         <div className="flex items-center justify-between mb-6">
           <h1 className="text-2xl font-bold">AWS Lab Environment</h1>
@@ -345,7 +397,7 @@ export default function LabCredentials({ params }: { params: { id: string } }) {
               <li>Do not share these credentials with anyone</li>
               <li>Save your work before the session expires</li>
               <li>Resources will be automatically cleaned up when you end the lab</li>
-              <li>Make sure to sign out of the AWS Console when you're done</li>
+              <li>Make sure to sign out of the AWS Console when you&apos;re done</li>
             </ul>
           </div>
         </div>
@@ -365,7 +417,7 @@ export default function LabCredentials({ params }: { params: { id: string } }) {
             <ol className="list-decimal pl-5 space-y-1 text-sm">
               <li>Go to your AWS Console window</li>
               <li>Click on your username in the top right corner</li>
-              <li>Select "Sign Out"</li>
+              <li>Select &quot;Sign Out&quot;</li>
               <li>Close the AWS Console window</li>
             </ol>
             <div className="mt-3 flex items-center justify-center">
