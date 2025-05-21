@@ -46,7 +46,7 @@ model Lab {
   id            String    @id @default(cuid())
   title         String
   difficulty    Difficulty @default(BEGINNER)
-  duration      Int
+  duration      Int       // Duration in minutes
   description   String?   @db.Text
   objectives    String[]  @default([])
   audience      String?   @db.Text
@@ -61,7 +61,7 @@ model Lab {
   sessions      LabSession[]
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
-  services      String[]  @default([])
+  services      String[]  @default([]) // AWS services that will be enabled for this lab
 
   @@index([authorId])
 }
@@ -122,7 +122,7 @@ model LabSession {
   userId                String
   awsAccountId          String
   password              String
-  awsUsername           String?  // Add this line
+  awsUsername           String?
   aws_access_key_id     String?
   aws_secret_access_key String?
   aws_session_token     String?
@@ -130,7 +130,6 @@ model LabSession {
   status                LabSessionStatus @default(ACTIVE)
   startedAt             DateTime @default(now())
   endedAt               DateTime?
-  timerEndsAt           DateTime? // When the lab session should end based on duration
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
 

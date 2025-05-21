@@ -239,11 +239,12 @@ async function deleteFromS3(url: string) {
   const bucketName = process.env.AWS_S3_BUCKET_NAME!;
   
   try {
-    // Extract everything after the last '/' in the URL
-    const key = new URL(url).pathname.substring(1); // Remove the leading '/'
-
+    // Extract the key from the S3 URL
+    const key = url.split('.com/')[1];
+    
     if (!key) {
-      throw new Error("S3 key extraction failed");
+      console.warn("Could not extract S3 key from URL:", url);
+      return;
     }
 
     const command = new DeleteObjectCommand({
@@ -252,8 +253,8 @@ async function deleteFromS3(url: string) {
     });
 
     await s3Client.send(command);
-    console.log(`Deleted: ${key}`);
   } catch (error) {
-    console.error("S3 Delete Error:", error);
+    console.error("Error deleting from S3:", error);
+    // Don't throw the error, just log it and continue
   }
 }
