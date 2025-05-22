@@ -183,7 +183,7 @@ interface DbLabResponse {
   audience: string | null;
   prerequisites: string | null;
   coveredTopics: string | string[];
-  steps: string | Record<string, any>;
+  steps: string | Record<string, { [key: string]: string | number | boolean | object }>;
   authorId: string;
   published: boolean;
   environmentImageBefore: string | null;

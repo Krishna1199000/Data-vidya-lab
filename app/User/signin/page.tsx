@@ -48,7 +48,7 @@ export default function SignInPage() {
       await new Promise((resolve) => setTimeout(resolve, 500))
       
       toast.success("Successfully signed in")
-      router.push("/User/dashboard")
+      router.push("/User/dashboard/labs")
       router.refresh()
     } catch (error) {
       console.error("Sign in error:", error)

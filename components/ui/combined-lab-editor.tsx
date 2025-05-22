@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { Editor } from "@tinymce/tinymce-react"
 import { Label } from "@/components/ui/label"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/Tabs"
 
 interface CombinedLabEditorProps {
   description: string
@@ -30,12 +30,6 @@ export function CombinedLabEditor({
 }: CombinedLabEditorProps) {
   const [activeTab, setActiveTab] = useState("description")
   
-  // Function to strip HTML tags
-  const stripHtmlTags = (html: string): string => {
-    const doc = new DOMParser().parseFromString(html, 'text/html');
-    return doc.body.textContent || '';
-  };
-
   // Editor configuration
   const editorConfig = {
     height,
@@ -62,17 +56,18 @@ export function CombinedLabEditor({
       '*': 'font-size,font-family,color,text-decoration,text-align'
     } as Record<string, string>,
     paste_preprocess: function (
-      plugin: any,
+      plugin: import('tinymce').Editor,
       args: { content: string }
     ): void {
       args.content = args.content.replace(/<p>&nbsp;<\/p>/g, '<br />');
     },
-    setup: function(editor) {
-      editor.on('GetContent', function(e) {
+    setup: function(editor: import('tinymce').Editor) {
+      editor.on('GetContent', function(e: { format: string; content: string }) {
         // This ensures we get clean text without HTML tags when requesting content
         if (e.format === 'text') {
           const div = document.createElement('div');
           div.innerHTML = e.content;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           e.content = div.textContent || div.innerText || '';
         }
       });

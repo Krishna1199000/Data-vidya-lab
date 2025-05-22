@@ -146,7 +146,7 @@ export default function CreateLab() {
   }
 
   const removeStep = (index: number) => {
-    const newSteps = steps.filter((_, i) => i !== index)
+    const newSteps = steps.filter((step, i) => i !== index)
     const renamedSteps = newSteps.map((step, idx) => ({
       ...step,
       title: `Step ${idx + 1}`
@@ -185,7 +185,7 @@ export default function CreateLab() {
     }
 
     const emptyFields = Object.entries(requiredFields)
-      .filter(([_, value]) => !value)
+      .filter(([, value]) => !value)
       .map(([key]) => key)
 
     if (emptyFields.length > 0) {

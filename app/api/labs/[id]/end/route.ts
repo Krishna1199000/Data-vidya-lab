@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server"
+import { NextResponse,NextRequest } from "next/server"
 import { getServerSession } from "next-auth/next"
 import { authOptions } from "@/app/api/auth.config"
 import { PrismaClient } from "@prisma/client"
@@ -22,8 +22,7 @@ const prisma = new PrismaClient()
 const execAsync = promisify(exec)
 
 export async function POST(
-  request: Request,
-  { params }: { params: { id: string } }
+  request: NextRequest
 ) {
   try {
     const session = await getServerSession(authOptions)

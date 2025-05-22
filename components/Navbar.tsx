@@ -1,8 +1,7 @@
 'use client';
 
-import { useState } from 'react';
 import Link from 'next/link';
-import { Menu, X, Database, Brain, Code, BookOpen } from 'lucide-react';
+import { Menu, Database, Brain, Code, BookOpen } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Sheet,
@@ -11,8 +10,6 @@ import {
 } from "@/components/ui/sheet";
 
 const Navbar = () => {
-  const [isOpen, setIsOpen] = useState(false);
-
   const menuItems = [
     { name: 'Products', href: '#products', icon: Database },
     { name: 'Solutions', href: '#solutions', icon: Brain },

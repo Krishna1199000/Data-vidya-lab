@@ -107,7 +107,6 @@ export async function PUT(
     return NextResponse.json({ error: "Failed to update lab" }, { status: 500 })
   }
 }
-
 export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -156,6 +155,7 @@ export async function DELETE(
   }
 }
 
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -187,6 +187,25 @@ export async function GET(
       return NextResponse.json({ error: "Lab not found" }, { status: 404 })
     }
 
+    // Fetch active lab session for the current user and lab
+    const activeLabSession = await db.labSession.findFirst({
+      where: {
+        userId: session.user.id,
+        labId: resolvedParams.id,
+        status: "ACTIVE",
+      },
+      select: { // Select necessary fields for the frontend
+        id: true,
+        awsAccountId: true,
+        awsUsername: true,
+        password: true,
+        aws_access_key_id: true,
+        aws_secret_access_key: true,
+        aws_session_token: true,
+        expiresAt: true,
+      },
+    });
+
     const environmentImageBefore = lab.environmentImageBefore
       ? await generateSignedUrl(lab.environmentImageBefore.split(".com/")[1] || "")
       : null;
@@ -201,10 +220,34 @@ export async function GET(
       isOwner: session.user.role === "ADMIN" && session.user.id === lab.authorId,
     }
 
-    return NextResponse.json(labWithOwnership)
+    // Safely parse steps if they exist
+    let parsedSteps = null;
+    try {
+      if (lab.steps) {
+        parsedSteps = JSON.parse(JSON.stringify(lab.steps));
+      }
+    } catch (parseError) {
+      console.error("Error parsing lab steps:", parseError);
+    }
+
+    const labWithParsedSteps = {
+      ...labWithOwnership,
+      steps: parsedSteps,
+    }
+
+    // Include activeLabSession in the response
+    const responseData = {
+      ...labWithParsedSteps,
+      activeLabSession: activeLabSession, // Include session data
+    };
+
+    return NextResponse.json(responseData)
   } catch (error) {
-    console.error("Fetch error:", error)
-    return NextResponse.json({ error: "Failed to fetch lab" }, { status: 500 })
+    console.error("Fetch error:", error instanceof Error ? error.message : "Unknown error");
+    return NextResponse.json(
+      { error: "Failed to fetch lab" },
+      { status: 500 }
+    )
   }
 }
 

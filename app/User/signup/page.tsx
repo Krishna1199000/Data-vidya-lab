@@ -72,7 +72,7 @@ export default function SignUpPage() {
           return
         }
 
-        router.push("/User/dashboard")
+        router.push("/User/dashboard/labs")
         router.refresh()
       }
     } catch {

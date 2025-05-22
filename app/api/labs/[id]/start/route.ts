@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+import { NextResponse,NextRequest } from 'next/server';
 import { getServerSession } from 'next-auth/next';
 import { authOptions } from "@/app/api/auth.config";
 import { PrismaClient } from "@prisma/client";
@@ -11,9 +11,10 @@ const prisma = new PrismaClient();
 const execAsync = promisify(exec);
 
 export async function POST(
-  request: Request,
-  { params }: { params: { id: string } }
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
 ) {
+  const resolvedParams = await params;
   try {
     const session = await getServerSession(authOptions);
     if (!session?.user?.email) {
@@ -36,7 +37,7 @@ export async function POST(
 
     // Get the lab details to retrieve selected services and duration
     const lab = await prisma.lab.findUnique({
-      where: { id: params.id },
+      where: { id: resolvedParams.id },
       select: {
         id: true,
         services: true,
@@ -91,7 +92,7 @@ export async function POST(
     // Create lab session in database
     const labSession = await prisma.labSession.create({
       data: {
-        labId: params.id,
+        labId: resolvedParams.id,
         userId: session.user.id,
         awsAccountId: accountId,
         awsUsername: userName.trim(),

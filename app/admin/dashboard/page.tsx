@@ -2,7 +2,7 @@
 
 import { useSession, signOut } from "next-auth/react"
 import { useRouter } from "next/navigation"
-import { DefaultSession } from "next-auth"
+
 import { useEffect, useState } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { Button } from "@/components/ui/button"
@@ -34,9 +34,12 @@ interface Lab {
 declare module "next-auth" {
   interface Session {
     user?: {
+      id: string
+      name?: string | null
+      email?: string | null
+      image?: string | null
       role?: string | null
-      id?: string | null
-    } & DefaultSession["user"]
+    }
   }
 }
 
