@@ -7,17 +7,19 @@ export default withAuth(
     const isAdmin = token?.role === "ADMIN";
     const path = req.nextUrl.pathname;
 
-    // Redirect authenticated users away from signin/signup
-    if ((path.startsWith("/signin") || path.startsWith("/signup")) && token) {
-      return NextResponse.redirect(new URL("/dashboard", req.url));
+    // If authenticated, redirect from signin/signup based on role
+    if ((path.startsWith("/User/signin") || path.startsWith("/User/signup")) && token) {
+      const redirectUrl = isAdmin ? "/admin/Profile" : "/User/dashboard/labs";
+      return NextResponse.redirect(new URL(redirectUrl, req.url));
     }
 
     // Protect admin-only routes
     if (
-      (path.startsWith("/admin/dashboard/create-lab") || path.startsWith("/admin/dashboard/edit-lab")) &&
+      path.startsWith("/admin/") && // Catch all admin routes
       !isAdmin
     ) {
-      return NextResponse.redirect(new URL("/admin/dashboard", req.url));
+      // Redirect non-admins trying to access admin routes to the user dashboard
+      return NextResponse.redirect(new URL("/User/dashboard/labs", req.url));
     }
 
     return NextResponse.next();
@@ -27,11 +29,12 @@ export default withAuth(
       authorized: ({ token }) => !!token, // Ensures the user is authenticated
     },
     pages: {
-      signIn: "/admin/auth", // Redirect unauthenticated users here
+      signIn: "/User/signin", // Redirect unauthenticated users to your sign-in page
+      error: '/auth/error',
     },
   }
 );
 
 export const config = {
-  matcher: ["/admin/dashboard/:path*", "/dashboard/:path*", "/signin", "/signup"],
+  matcher: ["/admin/:path*", "/User/dashboard/:path*", "/User/signin", "/User/signup"],
 };

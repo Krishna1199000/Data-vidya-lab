@@ -42,7 +42,7 @@ const LabPage: React.FC = () => {
   const [showCredentials, setShowCredentials] = useState(true);
   const { credentials, sessionId, awsConsoleWindow, openAWSConsole, setCredentials, setSessionId } = useCredentials();
   const { labDetails, currentStep, currentStepIndex, stepKeys, handleNextStep: originalHandleNextStep, setLabDetails } = useLabSteps();
-  const { timeRemaining, progressValue } = useLabTimer();
+  const { timeRemaining, progressValue, setExpiresAt } = useLabTimer();
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [isLabCompleted, setIsLabCompleted] = useState(false);
@@ -84,6 +84,11 @@ const LabPage: React.FC = () => {
           consoleUrl: `https://${initialData.activeLabSession.awsAccountId}.signin.aws.amazon.com/console`,
         });
         setLabDetails(initialData);
+
+        if (initialData.activeLabSession.expiresAt) {
+            setExpiresAt(new Date(initialData.activeLabSession.expiresAt));
+        }
+
         setLoading(false);
       } else {
         console.log("No active session found, starting a new one...");
@@ -96,6 +101,10 @@ const LabPage: React.FC = () => {
         if (!updatedResponse.ok) throw new Error("Failed to fetch updated lab details after starting session");
         const updatedData = await updatedResponse.json();
         setLabDetails(updatedData);
+
+        if (updatedData.activeLabSession?.expiresAt) {
+            setExpiresAt(new Date(updatedData.activeLabSession.expiresAt));
+        }
 
         setLoading(false);
         toast({
@@ -115,7 +124,7 @@ const LabPage: React.FC = () => {
         variant: "destructive"
       });
     }
-  }, [params.id, setCredentials, setSessionId, setLabDetails, toast]);
+  }, [params.id, setCredentials, setSessionId, setLabDetails, setExpiresAt, toast]);
 
   useEffect(() => {
     if (params.id && !hasInitiated.current) {

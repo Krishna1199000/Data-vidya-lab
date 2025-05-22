@@ -1,7 +1,7 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
-import { Progress } from "@/components/ui/progress";
+// import { Progress } from "@/components/ui/progress";
 import { Copy, Info,  CheckCircle, X } from "lucide-react";
 import {
   Tooltip,
@@ -32,7 +32,7 @@ interface CredentialsCardProps {
 
 export function CredentialsCard({ 
   credentials, 
-  progressValue, 
+  // progressValue, 
   openAWSConsole, 
   onClose 
 }: CredentialsCardProps) {
@@ -46,11 +46,11 @@ export function CredentialsCard({
     });
   };
 
-  const getProgressColor = (): string => {
-    if (progressValue > 50) return "bg-emerald-500";
-    if (progressValue > 20) return "bg-amber-500";
-    return "bg-red-500";
-  };
+  // const getProgressColor = (): string => {
+  //   if (progressValue > 50) return "bg-emerald-500";
+  //   if (progressValue > 20) return "bg-amber-500";
+  //   return "bg-red-500";
+  // };
 
   return (
     <Card className="w-full max-w-sm shadow-lg border-gray-200 border-opacity-70 p-0 overflow-hidden bg-white text-gray-900">
@@ -91,14 +91,14 @@ export function CredentialsCard({
       </div>
 
       {/* Progress Bar */}
-      <div className="w-full px-4 pt-2">
+      {/* <div className="w-full px-4 pt-2">
         <div className="text-xs text-gray-700 mb-1">{Math.round(progressValue)}%</div>
         <Progress
           value={progressValue}
           className="h-2 w-full transition-all duration-500"
           indicatorClassName={`transition-all duration-500 ${getProgressColor()}`}
         />
-      </div>
+      </div> */}
 
       {/* Credentials Section */}
       <div className="p-4 space-y-4 border-t border-gray-200 mt-4">

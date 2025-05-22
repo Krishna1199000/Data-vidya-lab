@@ -1,9 +1,11 @@
-import GoogleProvider from "next-auth/providers/google";
+// import GoogleProvider from "next-auth/providers/google";
+import CredentialsProvider from "next-auth/providers/credentials";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import db from "../../src/index";
 import { NextAuthOptions } from "next-auth";
 import type { Adapter } from "next-auth/adapters";
 import type { User as NextAuthUser } from "next-auth";
+import { compare } from 'bcryptjs';
 
 interface User extends NextAuthUser {
   role: string;
@@ -12,10 +14,33 @@ interface User extends NextAuthUser {
 export const authOptions: NextAuthOptions = {
   adapter: PrismaAdapter(db) as Adapter,
   providers: [
-    GoogleProvider({
-      clientId: process.env.GOOGLE_CLIENT_ID || "",
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET || "",
-      allowDangerousEmailAccountLinking: true,
+    CredentialsProvider({
+      name: "Credentials",
+      credentials: {
+        email: { label: "Email", type: "email" },
+        password: { label: "Password", type: "password" }
+      },
+      async authorize(credentials) {
+        if (!credentials?.email || !credentials.password) {
+          return null;
+        }
+
+        const user = await db.user.findUnique({
+          where: { email: credentials.email },
+        });
+
+        if (!user || !user.password) {
+          return null;
+        }
+
+        const isPasswordValid = await compare(credentials.password, user.password);
+
+        if (!isPasswordValid) {
+          return null;
+        }
+
+        return { id: user.id, email: user.email, name: user.name, image: user.image, role: user.role };
+      }
     }),
   ],
   secret: process.env.NEXTAUTH_SECRET || "secr3t",
@@ -24,34 +49,12 @@ export const authOptions: NextAuthOptions = {
     maxAge: 30 * 24 * 60 * 60, // 30 days
   },
   callbacks: {
-    async signIn({ user }) {
-      try {
-        if (!user.email) return false;
-
-        const existingUser = await db.user.findUnique({
-          where: { email: user.email }
-        });
-
-        if (!existingUser) {
-          const newUser = await db.user.create({
-            data: {
-              email: user.email,
-              name: user.name || "",
-              image: user.image || "",
-              role: "ADMIN" // Set role as ADMIN for all new users
-            }
-          });
-          user.id = newUser.id;
-          (user as User).role = newUser.role;
-        } else {
-          user.id = existingUser.id;
-          (user as User).role = existingUser.role;
-        }
-        return true;
-      } catch (error) {
-        console.error("Error in signIn callback:", error);
-        return false;
+    async signIn({ user, account}) {
+      if (account?.provider === 'credentials') {
+        return !!user;
       }
+
+      return !!user;
     },
     async jwt({ token, user }) {
       if (user) {
@@ -69,7 +72,6 @@ export const authOptions: NextAuthOptions = {
     },
   },
   pages: {
-    signIn: '/admin/auth',
     error: '/auth/error',
-  }
+  },
 };

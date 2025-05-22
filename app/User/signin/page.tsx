@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Icons } from "@/components/icons"
-import { signIn } from "next-auth/react"
+import { signIn, useSession } from "next-auth/react"
 import { toast } from "sonner"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
@@ -21,6 +21,7 @@ const signInSchema = z.object({
 export default function SignInPage() {
   const [isLoading, setIsLoading] = useState(false)
   const router = useRouter()
+  const { data: session, status } = useSession()
 
   const form = useForm<z.infer<typeof signInSchema>>({
     resolver: zodResolver(signInSchema),
@@ -41,22 +42,52 @@ export default function SignInPage() {
 
       if (result?.error) {
         toast.error("Invalid credentials")
+        setIsLoading(false)
         return
       }
 
-      // Wait for the session to be updated
-      await new Promise((resolve) => setTimeout(resolve, 500))
-      
-      toast.success("Successfully signed in")
-      router.push("/User/dashboard/labs")
-      router.refresh()
+      let sessionCheckInterval: NodeJS.Timeout | null = null
+      const sessionCheckTimeout = setTimeout(() => {
+        if (status === "authenticated" && session?.user?.role) {
+          handleRoleRedirect(session.user.role)
+        } else {
+          console.warn("Session did not update within timeout, forcing redirect.")
+          router.push("/User/dashboard/labs")
+          router.refresh()
+        }
+        setIsLoading(false)
+      }, 2000)
+
+      sessionCheckInterval = setInterval(() => {
+        if (status === "authenticated" && session?.user?.role) {
+          clearInterval(sessionCheckInterval!)
+          clearTimeout(sessionCheckTimeout)
+          toast.success("Successfully signed in")
+          handleRoleRedirect(session.user.role)
+          setIsLoading(false)
+        }
+      }, 200)
     } catch (error) {
       console.error("Sign in error:", error)
       toast.error("Something went wrong")
-    } finally {
       setIsLoading(false)
     }
   }
+
+  const handleRoleRedirect = (role: string) => {
+    if (role === "ADMIN") {
+      router.push("/admin/Profile")
+    } else {
+      router.push("/User/dashboard/labs")
+    }
+    router.refresh()
+  }
+
+  useEffect(() => {
+    if (status === "authenticated" && session?.user?.role) {
+      handleRoleRedirect(session.user.role)
+    }
+  }, [status, session, router])
 
   return (
     <div className="container relative h-screen flex-col items-center justify-center grid lg:max-w-none lg:grid-cols-2 lg:px-0">
@@ -116,27 +147,6 @@ export default function SignInPage() {
               Sign in
             </Button>
           </form>
-
-          <div className="relative">
-            <div className="absolute inset-0 flex items-center">
-              <span className="w-full border-t" />
-            </div>
-            <div className="relative flex justify-center text-xs uppercase">
-              <span className="bg-background px-2 text-muted-foreground">
-                Or continue with
-              </span>
-            </div>
-          </div>
-
-          <Button
-            variant="outline"
-            type="button"
-            disabled={isLoading}
-            onClick={() => signIn("google", { callbackUrl: "/User/dashboard" })}
-          >
-            <Icons.google className="mr-2 h-4 w-4" />
-            Google
-          </Button>
 
           <p className="text-center text-sm text-muted-foreground">
             Don&apos;t have an account?{" "}

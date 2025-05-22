@@ -41,10 +41,10 @@ const Navbar = () => {
               </Link>
             ))}
             <Button variant="outline" asChild>
-              <Link href="/signin">Sign In</Link>
+              <Link href="/User/signin">Sign In</Link>
             </Button>
             <Button asChild>
-              <Link href="/signup">Sign Up</Link>
+              <Link href="/User/signup">Sign Up</Link>
             </Button>
           </div>
 
@@ -69,10 +69,10 @@ const Navbar = () => {
                     </Link>
                   ))}
                   <Button variant="outline" asChild className="w-full">
-                    <Link href="/signin">Sign In</Link>
+                    <Link href="/User/signin">Sign In</Link>
                   </Button>
                   <Button asChild className="w-full">
-                    <Link href="/signup">Sign Up</Link>
+                    <Link href="/User/signup">Sign Up</Link>
                   </Button>
                 </div>
               </SheetContent>
