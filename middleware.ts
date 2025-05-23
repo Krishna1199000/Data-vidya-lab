@@ -26,10 +26,16 @@ export default withAuth(
   },
   {
     callbacks: {
-      authorized: ({ token }) => !!token, // Ensures the user is authenticated
+      authorized: ({ token, req }) => {
+        const path = req.nextUrl.pathname;
+        if (path.startsWith("/User/signin") || path.startsWith("/User/signup")) {
+          return true;
+        }
+        return !!token;
+      },
     },
     pages: {
-      signIn: "/User/signin", // Redirect unauthenticated users to your sign-in page
+      signIn: "/User/signin",
       error: '/auth/error',
     },
   }
