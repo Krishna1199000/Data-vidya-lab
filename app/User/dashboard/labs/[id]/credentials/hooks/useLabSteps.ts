@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useState } from "react";
+// import { useRouter } from "next/navigation";
 
 export interface LabStep {
   title: string;
@@ -18,7 +18,7 @@ export interface LabDetails {
 }
 
 export function useLabSteps() {
-  const router = useRouter();
+  // const router = useRouter();
   const [labDetails, setLabDetails] = useState<LabDetails | null>(null);
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
 
