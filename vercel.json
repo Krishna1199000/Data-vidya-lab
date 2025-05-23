@@ -1,13 +1,5 @@
 {
-  "builds": [
-    {
-      "src": "package.json",
-      "use": "@vercel/node",
-      "config": {
-        "buildCommand": "curl -L https://releases.hashicorp.com/terraform/1.7.4/terraform_1.7.4_linux_amd64.zip -o terraform.zip && unzip terraform.zip && chmod +x terraform && mv terraform /tmp/terraform && npm run build"
-      }
-    }
-  ],
+  "buildCommand": "curl -L https://releases.hashicorp.com/terraform/1.7.4/terraform_1.7.4_linux_amd64.zip -o terraform.zip && unzip terraform.zip && chmod +x terraform && mv terraform /tmp/terraform && npm run build",
   "functions": {
     "app/api/**/*.ts": {
       "memory": 1024,
