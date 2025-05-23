@@ -1,6 +1,6 @@
 import { NextResponse,NextRequest } from 'next/server';
 import { getServerSession } from 'next-auth/next';
-import { authOptions } from "@/app/api/auth.config";
+import { authOptions } from "@/lib/auth";
 import { PrismaClient } from "@prisma/client";
 import { exec } from 'child_process';
 import { promisify } from 'util';

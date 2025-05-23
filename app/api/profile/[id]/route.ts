@@ -2,7 +2,7 @@ import { type NextRequest } from "next/server"
 import { NextResponse } from "next/server"
 import db from "../../../../src/index"
 import { getServerSession } from "next-auth"
-import { authOptions } from "../../../api/auth.config"
+import { authOptions } from "@/lib/auth"
 import { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3"
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner"
 
