@@ -1,12 +1,4 @@
 terraform {
-  backend "s3" {
-    bucket         = "data-vidya-terraform-bucket"
-    key            = "account1/terraform.tfstate"
-    region         = "ap-south-1"
-    dynamodb_table = "terraform-state-locks"
-    encrypt        = true
-  }
-
   required_providers {
     aws = {
       source  = "hashicorp/aws"
@@ -16,7 +8,6 @@ terraform {
 }
 
 provider "aws" {
-  profile = "labuser1"
   region  = "ap-south-1"
 }
 

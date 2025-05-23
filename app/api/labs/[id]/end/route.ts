@@ -1,11 +1,12 @@
-import { NextResponse,NextRequest } from "next/server"
+import { NextResponse, NextRequest } from "next/server"
 import { getServerSession } from "next-auth/next"
 import { authOptions } from "@/lib/auth"
 import { PrismaClient } from "@prisma/client"
 import { exec } from "child_process"
 import { promisify } from "util"
 import path from "path"
-import fs from "fs"
+import fs from "fs/promises"
+import os from "os"
 import {
   IAMClient,
   DeleteUserCommand,
@@ -20,6 +21,44 @@ import {
 
 const prisma = new PrismaClient()
 const execAsync = promisify(exec)
+
+async function copyDirectory(src: string, dest: string) {
+  try {
+    // Create destination directory if it doesn't exist
+    await fs.mkdir(dest, { recursive: true });
+
+    // Read all files from source directory
+    const files = await fs.readdir(src);
+
+    // Copy each file
+    for (const file of files) {
+      const srcPath = path.join(src, file);
+      const destPath = path.join(dest, file);
+
+      const stat = await fs.stat(srcPath);
+      if (stat.isDirectory()) {
+        // Recursively copy subdirectories
+        await copyDirectory(srcPath, destPath);
+      } else {
+        // Copy file
+        await fs.copyFile(srcPath, destPath);
+      }
+    }
+  } catch (error) {
+    console.error('Error copying directory:', error);
+    throw error;
+  }
+}
+
+// Function to get the correct Terraform command based on the environment
+function getTerraformCommand() {
+  // Check if we're in a production environment (Vercel)
+  if (process.env.VERCEL) {
+    return '/tmp/terraform';
+  }
+  // For local development, just use 'terraform'
+  return 'terraform';
+}
 
 export async function POST(
   request: NextRequest
@@ -69,56 +108,78 @@ export async function POST(
 
     // Determine which account was used
     const accountNumber = labSession.awsUsername?.startsWith("student2-") ? "2" : "1"
-    const terraformDir = path.join(process.cwd(), "terraform", `account${accountNumber}`)
+    const sourceTerraformDir = path.join(process.cwd(), "terraform", `account${accountNumber}`)
+    const tmpDir = path.join(os.tmpdir(), `terraform-account${accountNumber}`)
 
     console.log(`Ending lab for user ${labSession.awsUsername} in account ${accountNumber}`)
 
     // Try Terraform destroy first
     let terraformSuccess = false
     try {
-      if (fs.existsSync(terraformDir)) {
-        console.log(`Attempting Terraform destroy in ${terraformDir}`)
+      // Copy terraform directory to /tmp
+      await copyDirectory(sourceTerraformDir, tmpDir)
+      console.log(`Copied terraform directory to ${tmpDir}`)
 
-        // Create terraform.tfvars with the same services list to ensure proper cleanup
-        if (lab && lab.services) {
-          const variablesFile = path.join(terraformDir, 'terraform.tfvars');
-          fs.writeFileSync(variablesFile, `services_list = ${JSON.stringify(lab.services)}\n`);
-        }
+      // Create terraform.tfvars with the same services list to ensure proper cleanup
+      if (lab && lab.services) {
+        const variablesFile = path.join(tmpDir, 'terraform.tfvars')
+        await fs.writeFile(variablesFile, `services_list = ${JSON.stringify(lab.services)}\n`)
+        console.log(`Created terraform.tfvars in ${tmpDir}`)
+      }
 
-        // Set AWS credentials for Terraform as environment variables
-        const env = {
-          ...process.env,
-          AWS_ACCESS_KEY_ID: process.env[`AWS_ACCESS_KEY_ID_LABUSER${accountNumber}`],
-          AWS_SECRET_ACCESS_KEY: process.env[`AWS_SECRET_ACCESS_KEY_LABUSER${accountNumber}`],
-          TF_VAR_username: labSession.awsUsername || undefined,
-        }
+      // Set AWS credentials for Terraform as environment variables
+      const env = {
+        ...process.env,
+        AWS_ACCESS_KEY_ID: process.env[`AWS_ACCESS_KEY_ID_LABUSER${accountNumber}`],
+        AWS_SECRET_ACCESS_KEY: process.env[`AWS_SECRET_ACCESS_KEY_LABUSER${accountNumber}`],
+        TF_VAR_username: labSession.awsUsername || undefined,
+      }
 
-        const { stdout, stderr } = await execAsync("terraform destroy -auto-approve", {
-          cwd: terraformDir,
-          env,
-          timeout: 300000, // 5 minute timeout
-        })
+      console.log('Initializing Terraform...')
+      const terraformCmd = getTerraformCommand();
+      await execAsync(`${terraformCmd} init`, { 
+        cwd: tmpDir,
+        env,
+      })
 
-        console.log("Terraform destroy stdout:", stdout)
-        if (stderr) console.error("Terraform destroy stderr:", stderr)
+      console.log('Destroying Terraform resources...')
+      const { stdout, stderr } = await execAsync(`${terraformCmd} destroy -auto-approve`, {
+        cwd: tmpDir,
+        env,
+        timeout: 300000, // 5 minute timeout
+      })
 
-        // Check if resources were destroyed
-        terraformSuccess = !stdout.includes("No objects need to be destroyed")
-      } else {
-        console.log(`Terraform directory not found: ${terraformDir}`)
+      console.log('Terraform destroy stdout:', stdout)
+      if (stderr) console.error('Terraform destroy stderr:', stderr)
+
+      // Check if resources were destroyed
+      terraformSuccess = !stdout.includes('No objects need to be destroyed')
+
+      // Clean up tmp directory
+      try {
+        await fs.rm(tmpDir, { recursive: true, force: true })
+        console.log(`Cleaned up temporary directory: ${tmpDir}`)
+      } catch (cleanupError) {
+        console.warn('Error cleaning up temporary directory:', cleanupError)
       }
     } catch (terraformError) {
-      console.error("Error during terraform destroy:", terraformError)
+      console.error('Error during terraform destroy:', terraformError)
+      // Clean up tmp directory in case of error
+      try {
+        await fs.rm(tmpDir, { recursive: true, force: true })
+        console.log(`Cleaned up temporary directory after error: ${tmpDir}`)
+      } catch (cleanupError) {
+        console.warn('Error cleaning up temporary directory:', cleanupError)
+      }
       // Continue with AWS SDK cleanup
     }
 
     // If Terraform didn't succeed, use AWS SDK directly
     if (!terraformSuccess) {
-      console.log("Terraform destroy did not succeed, using AWS SDK directly")
+      console.log('Terraform destroy did not succeed, using AWS SDK directly')
 
       try {
         // Create IAM client with proper credentials
-        // Map account number to the correct environment variable names
         const credentials = {
           "1": {
             accessKeyId: process.env.AWS_ACCESS_KEY_ID_LABUSER1 || '',
