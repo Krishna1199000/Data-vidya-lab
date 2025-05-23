@@ -124,7 +124,7 @@ export async function POST(
 
       // Initialize Terraform
       console.log('Initializing Terraform...');
-      await execAsync(`${terraformCmd} init -reconfigure`, {
+      await execAsync(`${terraformCmd} init -reconfigure -plugin-dir=${path.join(process.cwd(), 'lib', 'terraform', 'plugins')}`, {
         cwd: tmpDir,
         env,
       });

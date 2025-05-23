@@ -137,7 +137,7 @@ export async function POST(
 
       console.log('Initializing Terraform...')
       const terraformCmd = getTerraformCommand();
-      await execAsync(`${terraformCmd} init`, { 
+      await execAsync(`${terraformCmd} init -plugin-dir=${path.join(process.cwd(), 'lib', 'terraform', 'plugins')}`, { 
         cwd: tmpDir,
         env,
       })
