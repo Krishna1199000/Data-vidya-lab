@@ -5,7 +5,6 @@ import CredentialsProvider from "next-auth/providers/credentials"
 import db  from "../src/index"
 import { compare } from "bcrypt"
 import "next-auth"
-
 declare module "next-auth" {
   interface Session {
     user?: {
