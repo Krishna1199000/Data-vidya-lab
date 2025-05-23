@@ -9,6 +9,9 @@ import path from 'path';
 const prisma = new PrismaClient();
 const execAsync = promisify(exec);
 
+// Define the path to the Terraform binary within the project
+const TERRAFORM_BINARY_PATH = path.join(process.cwd(), 'lib', 'terraform', 'terraform');
+
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -62,11 +65,11 @@ export async function POST(
     console.log(`Starting lab with services: ${JSON.stringify(servicesVar)}`);
     
     // Initialize and apply Terraform
-    await execAsync('terraform init', { cwd: terraformDir });
+    await execAsync(`${TERRAFORM_BINARY_PATH} init`, { cwd: terraformDir });
     
     // Set a timeout for terraform apply to prevent hanging
     // Pass variables using -var flag
-    const applyResult = await execAsync(`terraform apply -auto-approve -var 'services_list=${JSON.stringify(servicesVar)}'`, { 
+    const applyResult = await execAsync(`${TERRAFORM_BINARY_PATH} apply -auto-approve -var 'services_list=${JSON.stringify(servicesVar)}'`, { 
       cwd: terraformDir,
       timeout: 300000, // 5 minute timeout
     });
@@ -77,10 +80,10 @@ export async function POST(
     }
 
     // Get outputs separately to handle sensitive values
-    const { stdout: userName } = await execAsync('terraform output -raw user_name', { cwd: terraformDir });
-    const { stdout: accessKeyId } = await execAsync('terraform output -raw access_key_id', { cwd: terraformDir });
-    const { stdout: secretAccessKey } = await execAsync('terraform output -raw secret_access_key', { cwd: terraformDir });
-    const { stdout: password } = await execAsync('terraform output -raw password', { cwd: terraformDir });
+    const { stdout: userName } = await execAsync(`${TERRAFORM_BINARY_PATH} output -raw user_name`, { cwd: terraformDir });
+    const { stdout: accessKeyId } = await execAsync(`${TERRAFORM_BINARY_PATH} output -raw access_key_id`, { cwd: terraformDir });
+    const { stdout: secretAccessKey } = await execAsync(`${TERRAFORM_BINARY_PATH} output -raw secret_access_key`, { cwd: terraformDir });
+    const { stdout: password } = await execAsync(`${TERRAFORM_BINARY_PATH} output -raw password`, { cwd: terraformDir });
 
     // Calculate expiration time based on lab duration
     const expiresAt = new Date(Date.now() + (lab.duration * 60 * 1000)); // Convert minutes to milliseconds
