@@ -5,12 +5,29 @@ import { PrismaClient } from "@prisma/client";
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
+import fs from 'fs/promises'; // Import fs/promises for async file operations
+import os from 'os'; // Import os for tmpdir
 
 const prisma = new PrismaClient();
 const execAsync = promisify(exec);
 
 // Define the path to the Terraform binary within the project
-const TERRAFORM_BINARY_PATH = path.join(process.cwd(), 'lib', 'terraform', 'terraform');
+const TERRAFORM_BINARY_PATH = process.env.VERCEL 
+  ? path.join(process.cwd(), 'lib', 'terraform', 'terraform') 
+  : 'terraform';
+
+// Helper function to copy directory recursively
+async function copyDirectory(src: string, dest: string): Promise<void> {
+  await fs.mkdir(dest, { recursive: true });
+  const entries = await fs.readdir(src, { withFileTypes: true });
+
+  for (const entry of entries) {
+    const srcPath = path.join(src, entry.name);
+    const destPath = path.join(dest, entry.name);
+
+    entry.isDirectory() ? await copyDirectory(srcPath, destPath) : await fs.copyFile(srcPath, destPath);
+  }
+}
 
 export async function POST(
   request: NextRequest,
@@ -53,7 +70,8 @@ export async function POST(
 
     // Determine which account to use based on active sessions
     const accountNumber = activeSessions + 1;
-    const terraformDir = path.join(process.cwd(), 'terraform', 'account' + accountNumber);
+    const sourceTerraformDir = path.join(process.cwd(), 'terraform', 'account' + accountNumber);
+    const terraformTmpDir = path.join(os.tmpdir(), `terraform-account-${Date.now()}-${Math.random().toString(36).substring(7)}`); // Use a unique tmp directory
     const accountId = accountNumber === 1 ? '124744987862' : '104023954744';
 
     // Create variables file for terraform to use the lab services
@@ -64,59 +82,74 @@ export async function POST(
     // Log the services being enabled for this lab session
     console.log(`Starting lab with services: ${JSON.stringify(servicesVar)}`);
     
-    // Initialize and apply Terraform
-    await execAsync(`${TERRAFORM_BINARY_PATH} init`, { cwd: terraformDir });
-    
-    // Set a timeout for terraform apply to prevent hanging
-    // Pass variables using -var flag
-    const applyResult = await execAsync(`${TERRAFORM_BINARY_PATH} apply -auto-approve -var 'services_list=${JSON.stringify(servicesVar)}'`, { 
-      cwd: terraformDir,
-      timeout: 300000, // 5 minute timeout
-    });
-    
-    console.log('Terraform apply output:', applyResult.stdout);
-    if (applyResult.stderr) {
-      console.warn('Terraform apply stderr:', applyResult.stderr);
+    try {
+      // Copy Terraform files to a writable directory (/tmp)
+      await copyDirectory(sourceTerraformDir, terraformTmpDir);
+      console.log(`Copied terraform files from ${sourceTerraformDir} to ${terraformTmpDir}`);
+
+      // Initialize Terraform in the temporary directory
+      await execAsync(`${TERRAFORM_BINARY_PATH} init`, { cwd: terraformTmpDir });
+      console.log('Terraform init successful.');
+      
+      // Set a timeout for terraform apply to prevent hanging
+      // Pass variables using -var flag
+      const applyResult = await execAsync(`${TERRAFORM_BINARY_PATH} apply -auto-approve -var 'services_list=${JSON.stringify(servicesVar)}'`, { 
+        cwd: terraformTmpDir, // Run apply in the temporary directory
+        timeout: 300000, // 5 minute timeout
+      });
+      
+      console.log('Terraform apply output:', applyResult.stdout);
+      if (applyResult.stderr) {
+        console.warn('Terraform apply stderr:', applyResult.stderr);
+      }
+
+      // Get outputs separately to handle sensitive values (run from tmp dir)
+      const { stdout: userName } = await execAsync(`${TERRAFORM_BINARY_PATH} output -raw user_name`, { cwd: terraformTmpDir });
+      const { stdout: accessKeyId } = await execAsync(`${TERRAFORM_BINARY_PATH} output -raw access_key_id`, { cwd: terraformTmpDir });
+      const { stdout: secretAccessKey } = await execAsync(`${TERRAFORM_BINARY_PATH} output -raw secret_access_key`, { cwd: terraformTmpDir });
+      const { stdout: password } = await execAsync(`${TERRAFORM_BINARY_PATH} output -raw password`, { cwd: terraformTmpDir });
+
+      // Calculate expiration time based on lab duration
+      const expiresAt = new Date(Date.now() + (lab.duration * 60 * 1000)); // Convert minutes to milliseconds
+
+      // Create lab session in database
+      const labSession = await prisma.labSession.create({
+        data: {
+          labId: resolvedParams.id,
+          userId: session.user.id,
+          awsAccountId: accountId,
+          awsUsername: userName.trim(),
+          aws_access_key_id: accessKeyId.trim(),
+          aws_secret_access_key: secretAccessKey.trim(),
+          password: password.trim(),
+          expiresAt: expiresAt,
+          status: 'ACTIVE',
+        },
+      });
+
+      return NextResponse.json({
+        sessionId: labSession.id,
+        credentials: {
+          accountId: accountId,
+          username: userName.trim(),
+          password: password.trim(),
+          accessKeyId: accessKeyId.trim(),
+          secretAccessKey: secretAccessKey.trim(),
+          region: 'ap-south-1',
+          consoleUrl: `https://${accountId}.signin.aws.amazon.com/console`,
+        },
+        expiresAt: expiresAt.toISOString(),
+        services: servicesVar,
+      });
+    } finally {
+      // Clean up the temporary directory
+      try {
+        await fs.rm(terraformTmpDir, { recursive: true, force: true });
+        console.log(`Cleaned up temporary directory: ${terraformTmpDir}`);
+      } catch (cleanupError) {
+        console.warn(`Error cleaning up temporary directory ${terraformTmpDir}:`, cleanupError);
+      }
     }
-
-    // Get outputs separately to handle sensitive values
-    const { stdout: userName } = await execAsync(`${TERRAFORM_BINARY_PATH} output -raw user_name`, { cwd: terraformDir });
-    const { stdout: accessKeyId } = await execAsync(`${TERRAFORM_BINARY_PATH} output -raw access_key_id`, { cwd: terraformDir });
-    const { stdout: secretAccessKey } = await execAsync(`${TERRAFORM_BINARY_PATH} output -raw secret_access_key`, { cwd: terraformDir });
-    const { stdout: password } = await execAsync(`${TERRAFORM_BINARY_PATH} output -raw password`, { cwd: terraformDir });
-
-    // Calculate expiration time based on lab duration
-    const expiresAt = new Date(Date.now() + (lab.duration * 60 * 1000)); // Convert minutes to milliseconds
-
-    // Create lab session in database
-    const labSession = await prisma.labSession.create({
-      data: {
-        labId: resolvedParams.id,
-        userId: session.user.id,
-        awsAccountId: accountId,
-        awsUsername: userName.trim(),
-        aws_access_key_id: accessKeyId.trim(),
-        aws_secret_access_key: secretAccessKey.trim(),
-        password: password.trim(),
-        expiresAt: expiresAt,
-        status: 'ACTIVE',
-      },
-    });
-
-    return NextResponse.json({
-      sessionId: labSession.id,
-      credentials: {
-        accountId: accountId,
-        username: userName.trim(),
-        password: password.trim(),
-        accessKeyId: accessKeyId.trim(),
-        secretAccessKey: secretAccessKey.trim(),
-        region: 'ap-south-1',
-        consoleUrl: `https://${accountId}.signin.aws.amazon.com/console`,
-      },
-      expiresAt: expiresAt.toISOString(),
-      services: servicesVar,
-    });
   } catch (error) {
     console.error('Error starting lab:', error);
     return NextResponse.json(
