@@ -32,6 +32,7 @@ export interface LabDetails {
     aws_access_key_id?: string | null;
     aws_secret_access_key?: string | null;
     expiresAt: string;
+    startedAt: string;
   } | null;
 }
 
@@ -45,7 +46,6 @@ const LabPage: React.FC = () => {
   const { timeRemaining, progressValue, setExpiresAt } = useLabTimer();
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [isLabCompleted, setIsLabCompleted] = useState(false);
   const { toast } = useToast();
 
   const hasInitiated = useRef(false);
@@ -142,12 +142,11 @@ const LabPage: React.FC = () => {
     if (!sessionId) {
       console.warn("Attempted to end lab with no active session ID");
       if (isCompletion) {
-        setIsLabCompleted(true);
         toast({
           title: "Lab Completed!",
           description: "Yahoo, you completed the lab! No active session found to clean up.",
         });
-        completeLabEnd();
+        router.push(`/User/dashboard/labs/${params.id}/your-results`);
       } else {
         toast({
           title: "Lab Ended",
@@ -160,6 +159,40 @@ const LabPage: React.FC = () => {
 
     try {
       console.log("Ending lab session with ID:", sessionId);
+
+      // Fetch latest session data
+      const sessionResponse = await fetch(`/api/labs/${params.id}/sessions/${sessionId}`);
+      if (!sessionResponse.ok) throw new Error("Failed to fetch latest session data");
+      const latestSession = await sessionResponse.json();
+
+      // Calculate completion metrics
+      const totalSteps = stepKeys.length;
+      const completedSteps = currentStepIndex + 1;
+      const completionPercentage = isCompletion ? 100 : Math.round((completedSteps / totalSteps) * 100);
+
+      // Calculate time spent (in seconds) using latest session start time
+      const startTime = latestSession?.startedAt ? new Date(latestSession.startedAt) : null;
+      const endTime = new Date();
+
+      let timeSpent = 0;
+      if (startTime) {
+        timeSpent = Math.floor((endTime.getTime() - startTime.getTime()) / 1000);
+      }
+
+      // Update session with completion metrics
+      await fetch(`/api/labs/${params.id}/sessions/${sessionId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          status: isCompletion ? 'ENDED' : 'ENDED',
+          completionPercentage,
+          timeSpent,
+          endedAt: endTime.toISOString(),
+        }),
+      });
+
       await endLabSession(params.id as string, sessionId);
 
       if (awsConsoleWindow && !awsConsoleWindow.closed) {
@@ -167,17 +200,15 @@ const LabPage: React.FC = () => {
       }
 
       if (isCompletion) {
-        setIsLabCompleted(true);
         toast({
           title: "Lab Completed! 💪",
-          description: "Yahoo, you completed the lab! Your AWS environment is being cleaned up.",
+          description: `You completed the lab in ${formatTimeSpent(timeSpent)}! Your AWS environment is being cleaned up.`,
         });
-        completeLabEnd();
+        router.push(`/User/dashboard/labs/${params.id}/your-results`);
       } else {
-        setIsLabCompleted(false);
         toast({
           title: "Lab Ended",
-          description: "Your lab session has been ended.",
+          description: `You completed ${completionPercentage}% of the lab in ${formatTimeSpent(timeSpent)}.`,
         });
         setShowLogoutDialog(true);
       }
@@ -186,13 +217,26 @@ const LabPage: React.FC = () => {
       console.error("Error ending lab:", err);
       setError(err instanceof Error ? err.message : "An error occurred while ending the lab");
       setShowLogoutDialog(true);
-      setIsLabCompleted(false);
       toast({
         title: "Error Ending Lab",
         description: err instanceof Error ? err.message : "An error occurred while trying to end the lab.",
         variant: "destructive"
       });
     }
+  };
+
+  const formatTimeSpent = (seconds: number) => {
+    if (seconds < 60) {
+      return `${seconds}s`;
+    }
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const remainingSeconds = seconds % 60;
+    
+    if (hours > 0) {
+      return `${hours}h ${minutes}m ${remainingSeconds}s`;
+    }
+    return `${minutes}m ${remainingSeconds}s`;
   };
 
   const handleNextStep = () => {
@@ -205,11 +249,7 @@ const LabPage: React.FC = () => {
 
   const completeLabEnd = () => {
     console.log("Lab session end process completed.");
-    if (isLabCompleted) {
-      router.push(`/User/dashboard/labs`);
-    } else {
-      router.push(`/User/dashboard/labs/${params.id}`);
-    }
+    router.push(`/User/dashboard/labs/${params.id}/your-results`);
     setSessionId(null);
     setCredentials(null);
     hasInitiated.current = false;

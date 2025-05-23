@@ -20,6 +20,8 @@ model User {
   accounts      Account[]
   sessions      Session[]
   labSessions   LabSession[]
+  bookmarks     Bookmark[]
+  labProgress   LabProgress[]
   createdAt     DateTime        @default(now())
   updatedAt     DateTime        @updatedAt
 }
@@ -59,6 +61,8 @@ model Lab {
   author        User      @relation(fields: [authorId], references: [id])
   authorId      String
   sessions      LabSession[]
+  bookmarks     Bookmark[]
+  progress      LabProgress[]
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
   services      String[]  @default([]) // AWS services that will be enabled for this lab
@@ -130,6 +134,11 @@ model LabSession {
   status                LabSessionStatus @default(ACTIVE)
   startedAt             DateTime @default(now())
   endedAt               DateTime?
+  completionPercentage  Int      @default(0)
+  timeSpent             Int      @default(0)
+  checksPassed          Int      @default(0)
+  checksFailed          Int      @default(0)
+  checkAttempts         Int      @default(0)
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
 
@@ -141,4 +150,38 @@ model LabSession {
 enum LabSessionStatus {
   ACTIVE
   ENDED
+}
+
+model Bookmark {
+  id        String   @id @default(cuid())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String
+  lab       Lab      @relation(fields: [labId], references: [id], onDelete: Cascade)
+  labId     String
+  createdAt DateTime @default(now())
+
+  @@unique([userId, labId])
+  @@index([userId])
+  @@index([labId])
+}
+
+model LabProgress {
+  id        String   @id @default(cuid())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String
+  lab       Lab      @relation(fields: [labId], references: [id], onDelete: Cascade)
+  labId     String
+  stepId    String   // ID of the step that was completed
+  status    StepStatus @default(UNCHECKED)
+  completedAt DateTime @default(now())
+
+  @@unique([userId, labId, stepId])
+  @@index([userId])
+  @@index([labId])
+}
+
+enum StepStatus {
+  UNCHECKED
+  CHECKED
+  FAILED
 }

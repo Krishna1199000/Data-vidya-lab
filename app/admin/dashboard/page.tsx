@@ -51,6 +51,10 @@ export default function Dashboard() {
 
   const isAdmin = session?.user?.role === "ADMIN"
 
+  console.log("Session status:", status);
+  console.log("User session:", session);
+  console.log("Is Admin:", isAdmin);
+
   useEffect(() => {
     if (status === "unauthenticated") {
       router.push("/admin/auth")
@@ -63,6 +67,7 @@ export default function Dashboard() {
         const response = await fetch("/api/labs")
         if (!response.ok) throw new Error("Failed to fetch labs")
         const data = await response.json()
+        console.log("Labs data received:", data);
         setLabs(data)
       } catch {
         toast.error("Failed to load labs")
