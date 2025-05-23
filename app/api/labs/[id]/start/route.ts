@@ -5,7 +5,6 @@ import { PrismaClient } from "@prisma/client";
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
-import fs from 'fs';
 
 const prisma = new PrismaClient();
 const execAsync = promisify(exec);
@@ -62,15 +61,12 @@ export async function POST(
     // Log the services being enabled for this lab session
     console.log(`Starting lab with services: ${JSON.stringify(servicesVar)}`);
     
-    // Create terraform.tfvars file with the selected services
-    const variablesFile = path.join(terraformDir, 'terraform.tfvars');
-    fs.writeFileSync(variablesFile, `services_list = ${JSON.stringify(servicesVar)}\n`);
-
     // Initialize and apply Terraform
     await execAsync('terraform init', { cwd: terraformDir });
     
     // Set a timeout for terraform apply to prevent hanging
-    const applyResult = await execAsync('terraform apply -auto-approve', { 
+    // Pass variables using -var flag
+    const applyResult = await execAsync(`terraform apply -auto-approve -var 'services_list=${JSON.stringify(servicesVar)}'`, { 
       cwd: terraformDir,
       timeout: 300000, // 5 minute timeout
     });
