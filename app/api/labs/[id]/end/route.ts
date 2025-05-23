@@ -54,7 +54,7 @@ async function copyDirectory(src: string, dest: string) {
 function getTerraformCommand() {
   // Check if we're in a production environment (Vercel)
   if (process.env.VERCEL) {
-    return path.join(process.cwd(), 'lib', 'terraform');
+    return path.join(process.cwd(), 'lib', 'terraform', 'terraform');
   }
   // For local development, just use 'terraform'
   return 'terraform';
