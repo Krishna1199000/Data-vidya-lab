@@ -63,12 +63,12 @@ export function TinyMCEEditor({
     plugins: [
       'advlist', 'autolink', 'lists', 'link', 'charmap', 'preview',
       'searchreplace', 'visualblocks', 'code', 'fullscreen',
-      'insertdatetime', 'media', 'table', 'code', 'help', 'wordcount'
+      'insertdatetime', 'media', 'table', 'code', 'help', 'wordcount', 'image'
     ],
     toolbar: 'undo redo | blocks | ' +
       'bold italic forecolor | alignleft aligncenter ' +
       'alignright alignjustify | bullist numlist outdent indent | ' +
-      'removeformat | help',
+      'removeformat | help | image',
     content_style: 'body { font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Oxygen, Ubuntu, Cantarell, Fira Sans, Droid Sans, Helvetica Neue, sans-serif; font-size: 14px }',
     placeholder: placeholder,
     branding: false,
@@ -78,13 +78,15 @@ export function TinyMCEEditor({
     forced_root_block: 'p',
     remove_linebreaks: false,
     paste_as_text: true,
-    valid_elements: 'p[style],br,strong/b,em/i,ul,ol,li,a[href],h1,h2,h3,h4,h5,h6,blockquote,code,pre',
+    valid_elements: 'p[style],br,strong/b,em/i,ul,ol,li,a[href],h1,h2,h3,h4,h5,h6,blockquote,code,pre,img[src|alt|width|height]',
     valid_styles: {
       '*': 'font-size,font-family,color,text-decoration,text-align'
     },
     formats: {
       p: { block: 'p', remove: 'all' }
     },
+    images_upload_url: '/api/admin/upload-image',
+    automatic_uploads: true,
     setup: function (editor: import('tinymce').Editor) {
       editor.on('init', () => {
         if (placeholder) {

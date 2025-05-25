@@ -7,7 +7,7 @@ const prisma = new PrismaClient();
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string; sessionId: string }> }
 ) {
   const resolvedParams = await params;
   try {
@@ -18,7 +18,7 @@ export async function GET(
 
     const labSession = await prisma.labSession.findUnique({
       where: {
-        id: resolvedParams.id,
+        id: resolvedParams.sessionId,
         userId: session.user.id,
         labId: resolvedParams.id,
       },
@@ -37,7 +37,7 @@ export async function GET(
 
 export async function PUT(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string; sessionId: string }> }
 ) {
   const resolvedParams = await params;
   try {
@@ -51,7 +51,7 @@ export async function PUT(
 
     const updatedSession = await prisma.labSession.update({
       where: {
-        id: resolvedParams.id,
+        id: resolvedParams.sessionId,
         userId: session.user.id,
         labId: resolvedParams.id,
       },
@@ -64,8 +64,8 @@ export async function PUT(
     });
 
     return NextResponse.json(updatedSession);
-  } catch (error) {
-    console.error("[SESSION_UPDATE]", error);
+  } catch (error: unknown) {
+    console.error("[SESSION_UPDATE]", error instanceof Error ? error.message : error);
     return new NextResponse("Internal Error", { status: 500 });
   }
 } 

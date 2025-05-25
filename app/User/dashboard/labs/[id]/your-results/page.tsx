@@ -166,7 +166,7 @@ export default function LabResultsPage() {
   }
 
   const currentSession = labData.sessions[0]; // Most recent session
-  const completionPercentage = labData.progress.completionPercentage;
+  const completionPercentage = labData.progress?.completionPercentage ?? 0;
   const timeSpent = currentSession?.timeSpent || 0;
   const status = currentSession?.status || "not_started";
 

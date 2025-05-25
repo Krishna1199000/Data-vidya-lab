@@ -1,1 +1,1 @@
-services_list = ["EC2","IAM","VPC"]
+services_list = ["EC2","CloudWatch","Elastic Beanstalk","API Gateway"]
